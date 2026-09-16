@@ -292,12 +292,20 @@ class MachineSettingsTab:
         try:
             self._settings = self.admin.api.get_machine_settings()
             self._populate_fields(self._settings)
-            seeded = self._settings.get("seeded_from_env", False)
-            self._seed_status_var.set(
-                f"{'Seeded from env' if seeded else 'User-edited'} | v{self._settings.get('version', 1)}"
-            )
+            self._update_status_label()
         except Exception as exc:
             messagebox.showerror("Error", f"Failed to load settings: {exc}")
+
+    def _update_status_label(self, prefix: str = "") -> None:
+        """Status line: seed origin + version + restart hint when the Connection
+        section on disk differs from what the running backend was built with."""
+        seeded = self._settings.get("seeded_from_env", False)
+        text = f"{'Seeded from env' if seeded else 'User-edited'} | v{self._settings.get('version', 1)}"
+        if prefix:
+            text = f"{prefix} | {text}"
+        if self._settings.get("restart_required"):
+            text += " | Connection berubah — restart backend agar berlaku"
+        self._seed_status_var.set(text)
 
     def _populate_fields(self, data: dict, prefix: str = "") -> None:
         """Recursively populate field vars from nested dict."""
@@ -363,8 +371,16 @@ class MachineSettingsTab:
         payload = self._collect_fields()
         try:
             self._settings = self.admin.api.update_machine_settings(payload)
-            self._seed_status_var.set("Saved (user-edited)")
-            messagebox.showinfo("Success", "Machine settings saved.")
+            self._update_status_label(prefix="Saved")
+            if self._settings.get("restart_required"):
+                messagebox.showwarning(
+                    "Saved — restart required",
+                    "Machine settings saved.\n\n"
+                    "I/O addresses, PLC timing, and inspection timers are active now.\n"
+                    "Connection / Transport changes only take effect after the backend restarts.",
+                )
+            else:
+                messagebox.showinfo("Success", "Machine settings saved and applied.")
         except Exception as exc:
             messagebox.showerror("Error", f"Save failed: {exc}")
 
@@ -379,7 +395,7 @@ class MachineSettingsTab:
             data = self.admin.api.seed_machine_settings(force=True)
             self._settings = data.get("settings", {})
             self._populate_fields(self._settings)
-            self._seed_status_var.set("Re-seeded from env")
+            self._update_status_label(prefix="Re-seeded")
             messagebox.showinfo("Success", "Settings re-seeded from .env")
         except Exception as exc:
             messagebox.showerror("Error", f"Re-seed failed: {exc}")

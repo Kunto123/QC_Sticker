@@ -149,6 +149,12 @@ class AppConfig:
     stream_port: int = max(1, int(os.getenv("QC_SUITE_STREAM_PORT", "8101")))
     stream_host: str = os.getenv("QC_SUITE_STREAM_HOST", "").strip()
     # PLC / Remote-IO clamp control.
+    # NOTE: every plc_* field below (and the timing fields above) is SEED-ONLY.
+    # They populate data/json_store/machine_settings.json on the first boot of a
+    # fresh machine; after that the JSON (editable from Admin → Machine Settings)
+    # is what container.py builds the adapter/worker/session timers from. Changing
+    # these env vars on an already-seeded machine has no effect unless you
+    # re-seed (POST /machine-settings/seed?force=1 or the UI button).
     # QC_SUITE_PLC_ENABLED=1  — activate the PLC worker (default off).
     # QC_SUITE_PLC_DRY_RUN=1  — log commands only, no real socket (default on so
     #   accidentally enabling PLC without hardware never opens a TCP connection).

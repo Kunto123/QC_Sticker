@@ -149,6 +149,11 @@ class PlcWorker:
             self._strategy = _build_strategy(
                 mode, self._adapter, settings, self._num_channels, self._dry_run
             )
+            # The poll loop, status() and clamp_engaged() still read the mirror
+            # fields below (not the strategy), so sync them from the same section
+            # the strategy was built from — otherwise inputs keep using env values.
+            section = settings.counter if (mode or "").strip().lower() == "component_count" else settings.sticker
+            self._sync_io_mirror_from_section(section)
             logger.info(
                 "[plc-worker] strategy built from MachineSettings: %s",
                 self._strategy.flow_name,
@@ -183,6 +188,32 @@ class PlcWorker:
                     self._strategy = DefectFlow(self._adapter, cfg, self._num_channels)
                 else:
                     self._strategy = StickerFlow(self._adapter, cfg, self._num_channels)
+
+    def _sync_io_mirror_from_section(self, section) -> None:
+        """Copy I/O addresses + feedback flag + accept pulse from a MachineSettings
+        mode section (StickerModeConfig / CounterModeConfig) into the mirror fields."""
+        self._input_release_address = max(0, int(section.input_release_address))
+        self._input_template_address = max(0, int(section.input_template_address))
+        self._input_clamp_engaged_address = max(0, int(section.input_clamp_engaged_address))
+        self._clamp_feedback_enabled = bool(section.clamp_feedback_enabled)
+        self._relay_clamp = max(0, int(section.relay_clamp_address))
+        self._relay_ok_light_buzzer = max(0, int(section.relay_ok_light_buzzer_address))
+        self._relay_enji_buzzer = max(0, int(section.relay_enji_buzzer_address))
+        self._accept_pulse_ms = max(0, int(section.accept_pulse_ms))
+
+    def apply_machine_settings(self, settings, *, mode: str = "sticker") -> None:
+        """Apply everything the worker owns from MachineSettings: strategy, I/O
+        mirror, and cycle guards. dry_run is NOT touched here — it belongs to
+        the adapter that was built at boot and cannot change at runtime.
+
+        Called from container at boot and from PUT /machine-settings.
+        """
+        self.set_validator_mode(mode, settings)
+        section = settings.counter if (mode or "").strip().lower() == "component_count" else settings.sticker
+        self.configure_guards(
+            min_reclamp_interval_ms=section.min_reclamp_interval_ms,
+            release_input_debounce_ms=section.release_input_debounce_ms,
+        )
 
     # ── Public API (unchanged signatures) ───────────────────────────
 
@@ -248,11 +279,15 @@ class PlcWorker:
         *,
         min_reclamp_interval_ms: int = 3000,
         release_input_debounce_ms: int = 500,
-        dry_run: bool = False,
+        dry_run: bool | None = None,
     ) -> None:
+        """Set cycle guards. dry_run=None keeps the current value — callers that
+        only refresh timing (PUT /machine-settings) must not flip it, because it
+        describes the adapter built at boot."""
         self._min_reclamp_interval_ms = max(0, int(min_reclamp_interval_ms))
         self._release_input_debounce_ms = max(0, int(release_input_debounce_ms))
-        self._dry_run = bool(dry_run)
+        if dry_run is not None:
+            self._dry_run = bool(dry_run)
 
     def unlock_cycle(self, *, reason: str = "manual") -> None:
         logger.info("[plc-worker] cycle unlocked — %s", reason)
