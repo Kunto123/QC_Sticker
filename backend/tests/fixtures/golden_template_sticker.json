@@ -1,0 +1,46 @@
+{
+  "id": 1,
+  "version_id": 1,
+  "version_number": 1,
+  "name": "QC Line A",
+  "description": "Golden sticker template — derived from the seeded default in templates_repository._sample_template. Frozen contract; do not edit casually.",
+  "is_active": true,
+  "camera": {"camera_index": 0, "width": 640, "height": 480, "fps": 15},
+  "part_ready_roi": {"x": 0.2, "y": 0.2, "w": 0.25, "h": 0.25, "width": 160, "height": 120},
+  "sticker_roi": {"x": 0.2, "y": 0.2, "w": 0.6, "h": 0.6, "width": 320, "height": 240},
+  "vision": {
+    "model_path": "models/dummy.pt",
+    "model_meta_path": null,
+    "runtime": "ultralytics",
+    "conf_threshold": 0.25,
+    "stream_fps": 10,
+    "inference_fps": 4,
+    "imgsz": 640,
+    "classes": ["K0W-HB0", "K1Z-FA0", "K2S-H30"],
+    "enable_ergonomic_check": false,
+    "ergonomic_pose_model_path": null,
+    "ergonomic_min_keypoint_conf": 0.35
+  },
+  "part_ready": {
+    "enabled": true,
+    "color_profile_id": null,
+    "colorspace": "LAB",
+    "distance_threshold": null,
+    "min_match_ratio": 0.75
+  },
+  "sticker": {
+    "part_name": "Sample Part",
+    "expected_class": "K0W-HB0",
+    "enabled": true,
+    "validator_mode": "ml_detection",
+    "min_roi_confidence": 0.0,
+    "min_class_confidence": null,
+    "max_offset_x": 80,
+    "max_offset_y": 80,
+    "tilt_gate_enabled": false,
+    "expected_tilt_degrees": 0.0,
+    "max_tilt_degrees": null
+  },
+  "persistence": {"write_to_db": true},
+  "metadata": {}
+}

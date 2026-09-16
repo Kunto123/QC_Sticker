@@ -1,0 +1,45 @@
+{
+  "id": 3,
+  "version_id": 3,
+  "version_number": 1,
+  "name": "Defect Line C",
+  "description": "Golden defect (anomaly) template. Frozen contract. criteria.rois shape matches DefectEvaluator (name/geometry/threshold/model_path) + default_model_path + inference_mode + aggregation.",
+  "is_active": true,
+  "camera": {"camera_index": 0, "width": 640, "height": 480, "fps": 15},
+  "part_ready_roi": {"x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3},
+  "sticker_roi": {"x": 0.1, "y": 0.1, "w": 0.8, "h": 0.8},
+  "vision": {
+    "model_path": "models/dummy.pt",
+    "runtime": "ultralytics",
+    "conf_threshold": 0.25
+  },
+  "part_ready": {"enabled": true, "colorspace": "LAB", "min_match_ratio": 0.75},
+  "sticker": {
+    "part_name": "Surface Panel",
+    "expected_class": "panel",
+    "enabled": true,
+    "validator_mode": "defect"
+  },
+  "persistence": {"write_to_db": true},
+  "mode": "defect",
+  "criteria": {
+    "default_model_path": "",
+    "inference_mode": "whole_part",
+    "aggregation": "p99",
+    "rois": [
+      {
+        "name": "Top Surface",
+        "geometry": {"x": 0.1, "y": 0.1, "w": 0.4, "h": 0.4},
+        "threshold": 0.5,
+        "model_path": ""
+      },
+      {
+        "name": "Bottom Surface",
+        "geometry": {"x": 0.5, "y": 0.5, "w": 0.4, "h": 0.4},
+        "threshold": 0.6,
+        "model_path": ""
+      }
+    ]
+  },
+  "metadata": {}
+}

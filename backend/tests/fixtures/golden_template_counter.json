@@ -1,0 +1,45 @@
+{
+  "id": 2,
+  "version_id": 2,
+  "version_number": 1,
+  "name": "Counter Line B",
+  "description": "Golden counter (component_count) template. Frozen contract for evaluator dispatch. component_rois shape matches ComponentRoiRule / CounterEvaluator.",
+  "is_active": true,
+  "camera": {"camera_index": 0, "width": 640, "height": 480, "fps": 15},
+  "part_ready_roi": {"x": 0.1, "y": 0.1, "w": 0.3, "h": 0.3},
+  "sticker_roi": {"x": 0.1, "y": 0.1, "w": 0.8, "h": 0.8},
+  "vision": {
+    "model_path": "models/dummy.pt",
+    "runtime": "ultralytics",
+    "conf_threshold": 0.25,
+    "classes": ["bolt", "washer", "nut"]
+  },
+  "part_ready": {"enabled": true, "colorspace": "LAB", "min_match_ratio": 0.75},
+  "sticker": {
+    "part_name": "Assembly A",
+    "expected_class": "assembly",
+    "enabled": true,
+    "validator_mode": "component_count"
+  },
+  "persistence": {"write_to_db": true},
+  "component_rois": [
+    {
+      "name": "Left Bracket",
+      "roi": {"x": 0.0, "y": 0.0, "w": 0.5, "h": 1.0},
+      "classes": [
+        {"class_name": "bolt", "count": 2, "min_count": 2, "max_count": 2},
+        {"class_name": "washer", "count": 1, "min_count": 1, "max_count": null}
+      ],
+      "strict_foreign_class": true
+    },
+    {
+      "name": "Right Bracket",
+      "roi": {"x": 0.5, "y": 0.0, "w": 0.5, "h": 1.0},
+      "classes": [
+        {"class_name": "nut", "count": 4, "min_count": 4, "max_count": 4}
+      ],
+      "strict_foreign_class": false
+    }
+  ],
+  "metadata": {}
+}
