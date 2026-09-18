@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import concurrent.futures
-import copy
 import cv2
 import logging
 import os
@@ -19,39 +18,26 @@ from backend.app.core.config import AppConfig
 from backend.app.core.json_safety import to_jsonable
 from backend.app.models.session_state import SessionState
 from backend.app.repositories.inspection_results_repository import InspectionResultsRepository
-from backend.app.repositories.profiles_repository import ProfilesRepository
 from backend.app.repositories.reject_log_repository import RejectLogRepository
 from backend.app.services.operator_state_machine import OperatorInspectionStateMachine
-from backend.app.services.part_ready_detector import evaluate_color_profile_match, evaluate_hsv_black_ratio, _hsv_bounds
 from backend.app.services.sticker_inference import StickerInferenceService
 from backend.app.services.template_runtime import TemplateRuntimeService
-from backend.app.services.text_tilt import estimate_white_text_tilt
 from shared.contracts.enums import DecisionCode, InspectionEventState, RejectReasonCode, SessionStatus
-from shared.contracts.templates import RoiGeometry, normalize_mode
-from backend.app.services.evaluators.registry import get_evaluator
+from shared.contracts.templates import RoiGeometry
 
 
 logger = logging.getLogger(__name__)
 
 
 KNOWN_REJECT_CODES = (
-    RejectReasonCode.OUT_OF_ANGLE.value,
     RejectReasonCode.WRONG_TYPE.value,
     RejectReasonCode.COMMIT_TIMEOUT.value,
 )
 MAX_RECENT_EVENTS = 8
-COMMIT_STABLE_FRAMES = 1
 COMMIT_COOLDOWN_MS = 800
 PRESENCE_MIN_AREA_RATIO = 0.01
 PRESENCE_MIN_STD = 8.0
 PRESENCE_MIN_MEAN = 6.0
-ROI_CLASS_VALIDATOR_MODES = {
-    "ml_roi_class",
-    "ml_roi_classification",
-    "roi_class",
-    "roi_partial",
-}
-
 
 def _decode_image(image_b64: str):
     raw = base64.b64decode(image_b64)
@@ -73,30 +59,6 @@ def _encode_image(image) -> str:
     return base64.b64encode(encoded.tobytes()).decode("ascii")
 
 
-def _apply_rotation(frame: np.ndarray, rotation_degrees: float) -> np.ndarray:
-    """Apply free rotation to frame. Supports any angle."""
-    if not frame.size:
-        return frame
-    rotation_degrees = float(rotation_degrees) % 360.0
-    if rotation_degrees == 0.0:
-        return frame
-    h, w = frame.shape[:2]
-    center = (w // 2, h // 2)
-    M = cv2.getRotationMatrix2D(center, -rotation_degrees, 1.0)
-    cos_a = abs(M[0, 0])
-    sin_a = abs(M[0, 1])
-    new_w = int(h * sin_a + w * cos_a)
-    new_h = int(h * cos_a + w * sin_a)
-    M[0, 2] += (new_w - w) / 2
-    M[1, 2] += (new_h - h) / 2
-    return cv2.warpAffine(frame, M, (new_w, new_h), borderMode=cv2.BORDER_REPLICATE)
-
-
-def _rotate_frame(frame: np.ndarray, rotation_degrees: float) -> np.ndarray:
-    """Alias for _apply_rotation (backward compat)."""
-    return _apply_rotation(frame, rotation_degrees)
-
-
 def _empty_reject_breakdown() -> dict[str, int]:
     return {code: 0 for code in KNOWN_REJECT_CODES}
 
@@ -112,18 +74,10 @@ def _round_bbox(position: dict[str, Any] | None) -> dict[str, float] | None:
     }
 
 
-def _estimate_tilt_from_roi(roi_frame, expected_tilt_degrees: float, config: Any | None = None) -> dict[str, Any]:
-    """Estimate sticker rotation using edge detection pipeline.
-    Always delegates to estimate_sticker_rotation (alias: estimate_white_text_tilt).
-    """
-    return estimate_white_text_tilt(roi_frame, expected_tilt_degrees, config)
-
-
 class InspectionSessionService:
     def __init__(
         self,
         template_runtime: TemplateRuntimeService,
-        profiles_repo: ProfilesRepository,
         results_repo: InspectionResultsRepository,
         sticker_inference: StickerInferenceService,
         app_config: AppConfig | None = None,
@@ -131,7 +85,6 @@ class InspectionSessionService:
         reject_log_repo: RejectLogRepository | None = None,
     ) -> None:
         self._template_runtime = template_runtime
-        self._profiles_repo = profiles_repo
         self._results_repo = results_repo
         self._sticker_inference = sticker_inference
         self._sessions: dict[str, SessionState] = {}
@@ -217,18 +170,6 @@ class InspectionSessionService:
             max(0, int(app_config.accept_stable_ms))
             if app_config is not None else 200
         )
-        self._hard_reject_stable_frames: int = (
-            max(1, int(app_config.hard_reject_stable_frames))
-            if app_config is not None else 3
-        )
-        self._hard_reject_stable_ms: int = (
-            max(0, int(app_config.hard_reject_stable_ms))
-            if app_config is not None else 500
-        )
-        self._camera_rotation_degrees: float = (
-            float(app_config.camera_default_rotation_degrees)
-            if app_config is not None else 0.0
-        )
         # Inference cache TTL (ms) — how long cached inference is considered fresh
         self._inference_cache_ttl_ms: int = (
             max(100, int(app_config.inference_cache_ttl_ms))
@@ -238,10 +179,6 @@ class InspectionSessionService:
             max(1.0, float(getattr(app_config, "inference_timeout_s", 5.0)))
             if app_config is not None else 5.0
         )
-        # NG JSONL logger (daily rolling, no images)
-        from backend.app.services.ng_cache_logger import NgCacheLogger
-        _ng_log_dir = getattr(app_config, "ng_log_dir", None) if app_config is not None else None
-        self._ng_logger = NgCacheLogger(_ng_log_dir, retention_days=30) if _ng_log_dir else None
         # Register PLC state change callback
         if self._plc_worker is not None:
             self._plc_worker.set_on_state_change_callback(self._on_plc_state_change)
@@ -251,6 +188,11 @@ class InspectionSessionService:
         # Item 1: pending actuation results awaiting ACK/NACK
         # Maps event_id -> {decision, result_id, status}
         self._pending_actuations: dict[str, dict] = {}
+
+    def apply_machine_settings(self, settings) -> None:
+        """Live-apply MachineSettings.timing (called after a Machine Settings save)."""
+        from dataclasses import asdict
+        self.update_timing_settings(asdict(settings.timing))
 
     def update_timing_settings(self, data: dict) -> None:
         """Override timing/inspection settings at runtime (called after Machine Settings save).
@@ -268,10 +210,6 @@ class InspectionSessionService:
             "accept_stable_frames", self._accept_stable_frames)))
         self._accept_stable_ms = max(0, int(timing.get(
             "accept_stable_ms", self._accept_stable_ms)))
-        self._hard_reject_stable_frames = max(1, int(timing.get(
-            "hard_reject_stable_frames", self._hard_reject_stable_frames)))
-        self._hard_reject_stable_ms = max(0, int(timing.get(
-            "hard_reject_stable_ms", self._hard_reject_stable_ms)))
         self._commit_grace_ms = max(0, int(timing.get(
             "commit_grace_ms", self._commit_grace_ms)))
         self._reject_timeout_ms = max(0, int(timing.get(
@@ -557,17 +495,11 @@ class InspectionSessionService:
         *,
         client_id: str,
         camera_index: int,
-        camera_rotation_degrees: float = 0.0,
         template_version_id: int,
         line_id: str | None = None,
         station_id: str | None = None,
     ) -> dict[str, Any]:
         template = self._template_runtime.resolve_template_by_version(template_version_id)
-        # Apply camera rotation override from session creation payload
-        _cam_rotation = float(camera_rotation_degrees or 0)
-        if _cam_rotation != 0.0:
-            template = copy.deepcopy(template)
-            template.camera.rotation_degrees = _cam_rotation
         session_id = uuid.uuid4().hex
         state = SessionState(
             session_id=session_id,
@@ -618,8 +550,6 @@ class InspectionSessionService:
         if after_part_ready_signature != before_part_ready_signature:
             state.part_ready_ratio_history.clear()
             state.part_ready_ema_ratio = -1.0
-            state.hsv_adaptive_lower = None
-            state.hsv_adaptive_upper = None
         return self._session_payload(state)
 
     def get_latest_preview(self) -> dict[str, Any] | None:
@@ -743,40 +673,18 @@ class InspectionSessionService:
         state.frame_index += 1
         state.last_activity_at = time.time()
 
-        # Apply camera rotation from template config
-        _rotation = float(getattr(state.template.camera, "rotation_degrees", None)
-                          or self._camera_rotation_degrees)
-        if _rotation != 0.0:
-            frame = _apply_rotation(frame, _rotation)
-
         part_ready_started = time.perf_counter()
-        validator_mode = str(getattr(state.template.sticker, "validator_mode", "") or "").strip().lower()
-        is_component_counter = normalize_mode(validator_mode) == "counter"
-        is_sticker = validator_mode in ("sticker", "ml_detection")
-        _part_ready_source = "sensor"
-        if is_component_counter:
-            _part_ready_source = str((state.template.criteria or {}).get("part_ready_source") or "sensor").strip().lower()
-        _use_sensor_stub = is_component_counter and _part_ready_source != "camera_roi"
-
-        if _use_sensor_stub:
-            # Component Counter mode with sensor input: ignore camera-based part ready ROI
-            part_ready_frame = None
-            part_ready_roi_meta = {}
-            part_ready = {"part_ready": True, "status": "sensor_input", "match_ratio": 1.0}
-            presence = {"present": True, "area_ratio": 1.0, "mean": 255.0, "std": 0.0}
+        part_ready_frame, part_ready_roi_meta = self._crop_stage_roi(
+            frame,
+            state.template.part_ready_roi,
+            state.part_ready_roi_override,
+        )
+        if state.part_ready_latched:
+            part_ready = {"part_ready": True, "status": "latched", "match_ratio": 1.0}
         else:
-            part_ready_frame, part_ready_roi_meta = self._crop_stage_roi(
-                frame,
-                state.template.part_ready_roi,
-                state.part_ready_roi_override,
-            )
-        if not _use_sensor_stub:
-            if state.part_ready_latched:
-                part_ready = {"part_ready": True, "status": "latched", "match_ratio": 1.0}
-            else:
-                part_ready = self._evaluate_part_ready(part_ready_frame, state)
-            presence = self._detect_part_presence(part_ready_frame)
-            timings["part_ready_eval_ms"] = _elapsed_ms(part_ready_started)
+            part_ready = self._evaluate_part_ready(part_ready_frame, state)
+        presence = self._detect_part_presence(part_ready_frame)
+        timings["part_ready_eval_ms"] = _elapsed_ms(part_ready_started)
 
         roi_crop_started = time.perf_counter()
         sticker_frame, sticker_roi_meta = self._crop_stage_roi(
@@ -839,7 +747,7 @@ class InspectionSessionService:
                 "validation": {
                     "decision": None,
                     "reject_reason_code": None,
-                    "validation_details": {"mode": normalize_mode(validator_mode)},
+                    "validation_details": {},
                 },
                 "inspection_policy": {"action": "pending", "commit_allowed": False},
                 "count_committed": False,
@@ -1111,9 +1019,7 @@ class InspectionSessionService:
                         thread_name_prefix=f"qc-inference-{state.session_id[:8]}",
                     )
                 try:
-                    # Component counter: run inference on FULL frame so detections
-                    # carry absolute pixel coords for assign-by-coordinate.
-                    _inf_frame = frame.copy() if is_component_counter else sticker_frame.copy()
+                    _inf_frame = sticker_frame.copy()
                     _future = state._inference_executor.submit(
                         self._run_sticker_inference_sync,
                         _inf_frame,
@@ -1150,9 +1056,6 @@ class InspectionSessionService:
                     "fallback_reason": None,
                     "raw_detection_count": 0,
                     "allowed_labels_filter": [],
-                    "anchor": None,
-                    "ocr": None,
-                    "geometry": None,
                     "device_mode": None,
                     "effective_device": None,
                     "device_backend": None,
@@ -1171,9 +1074,6 @@ class InspectionSessionService:
                 fallback_reason=inference_payload.get("fallback_reason"),
                 raw_detection_count=inference_payload.get("raw_detection_count"),
                 allowed_labels_filter=inference_payload.get("allowed_labels_filter"),
-                anchor=inference_payload.get("anchor"),
-                ocr=inference_payload.get("ocr"),
-                geometry=inference_payload.get("geometry"),
                 stage_timings=stage_timings,
             )
             sticker_detection.update(
@@ -1216,9 +1116,6 @@ class InspectionSessionService:
                     fallback_reason=_cached_inf["inference_payload"].get("fallback_reason"),
                     raw_detection_count=_cached_inf["inference_payload"].get("raw_detection_count"),
                     allowed_labels_filter=_cached_inf["inference_payload"].get("allowed_labels_filter"),
-                    anchor=_cached_inf["inference_payload"].get("anchor"),
-                    ocr=_cached_inf["inference_payload"].get("ocr"),
-                    geometry=_cached_inf["inference_payload"].get("geometry"),
                 )
                 sticker_detection["from_cache"] = True
                 sticker_detection["cache_age_ms"] = round(_cache_age_ms, 1)
@@ -1243,14 +1140,6 @@ class InspectionSessionService:
             )
         timings["inference_ms"] = round(inference_ms, 2)
 
-        # Component counter: assign detections to ROIs by coordinate
-        if is_component_counter and state.template.component_rois:
-            _fh = int(frame.shape[0]) if frame is not None else 0
-            _fw = int(frame.shape[1]) if frame is not None else 0
-            self._assign_detections_to_component_rois(
-                detections, state.template.component_rois, _fw, _fh
-            )
-
         validation_started = time.perf_counter()
         validation = self._validate_sticker(
             roi_frame=sticker_frame,
@@ -1260,7 +1149,6 @@ class InspectionSessionService:
             part_ready_payload=effective_part_ready,
             username=username,
             user_id=user_id,
-            full_frame=frame,  # needed for defect mode (crop ROIs)
         )
         timings["validation_ms"] = _elapsed_ms(validation_started)
         validation_details = validation.get("validation_details") or {}
@@ -1286,7 +1174,6 @@ class InspectionSessionService:
 
         _hard_reject_reasons = self._hard_reject_reasons  # set from config
         _is_accept = _decision == DecisionCode.ACCEPT.value
-        _is_accept_candidate = (_decision == "ACCEPT_CANDIDATE")
         _is_hard_reject = (
             _decision == DecisionCode.REJECT.value
             and _reason in _hard_reject_reasons
@@ -1313,27 +1200,21 @@ class InspectionSessionService:
         )
 
         # Hard reject must always cancel holdover — otherwise the holdover
-        # window would mask a genuine WRONG_TYPE/OUT_OF_ANGLE and let it
-        # credit accept counters (false-accept risk).
+        # window would mask a genuine WRONG_TYPE and let it credit accept
+        # counters (false-accept risk).
         if _is_hard_reject and _in_holdover:
             state.policy_holdover_expires_at = None
             _in_holdover = False
 
         _effective_is_accept = _is_accept or _in_holdover
-        _is_stabilizing = _is_accept_candidate  # all OK but not yet N-consecutive
         if _is_accept:                           # real detection came back
             state.policy_holdover_expires_at = None  # cancel holdover on re-detection
 
         if _is_non_hard_reject:
             # Non-hard reject is pure noise — do NOT touch any stability counters.
-            # We must not increment policy_stable_frames (would falsely accumulate
-            # toward hard_reject_stable_frames threshold) and must not reset
+            # We must not increment policy_stable_frames and must not reset
             # last_policy_key (would break an existing accept streak).
             pass
-        elif _is_stabilizing:
-            # Accept candidate (component counter: all OK but not yet N-consecutive).
-            # Increment stability counters but don't allow commit yet.
-            state.policy_stable_frames += 1
         elif _policy_key == state.last_policy_key:
             state.policy_stable_frames += 1
         elif _in_holdover:
@@ -1355,7 +1236,7 @@ class InspectionSessionService:
             # The system must keep inferring; non-hard reject should not break an
             # existing accept streak.
             pass
-        elif _effective_is_accept or _is_stabilizing:
+        elif _effective_is_accept:
             if state.inference_result_generation > state.inference_last_counted_generation:
                 # New inference result since last counted — record it
                 state.inference_last_counted_generation = state.inference_result_generation
@@ -1443,35 +1324,10 @@ class InspectionSessionService:
                     _parts.append(f"stable_ms({_stable_elapsed_ms:.0f}/{self._accept_stable_ms}ms)")
                 _pending_reason = f"accept_stabilizing({', '.join(_parts)})"
 
-        elif _is_accept_candidate:
-            # Component counter: all ROIs OK but not yet N-consecutive.
-            # Keep scanning — don't commit, don't reject.
-            _policy_action = "pending"
-            _pending_reason = "component_stabilizing"
-
         elif _is_hard_reject:
-            # Hard reject (OUT_OF_ANGLE, WRONG_TYPE): commit only after grace + higher stability
-            # EXCEPTION: For sticker mode, do NOT auto-commit hard reject — wait for timeout reject instead
-            if is_sticker:
-                _policy_action = "pending"
-                _pending_reason = "sticker_hard_reject_awaiting_timeout"
-            else:
-                _grace_ok = _stable_elapsed_ms >= self._commit_grace_ms
-                _frames_ok = state.policy_stable_frames >= self._hard_reject_stable_frames
-                _ms_ok = _stable_elapsed_ms >= self._hard_reject_stable_ms
-                if _grace_ok and _frames_ok and _ms_ok:
-                    _commit_allowed = True
-                    _policy_action = "hard_reject_commit"
-                else:
-                    _policy_action = "pending"
-                    _parts = []
-                    if not _grace_ok:
-                        _parts.append(f"grace({_stable_elapsed_ms:.0f}/{self._commit_grace_ms}ms)")
-                    if not _frames_ok:
-                        _parts.append(f"stable_frames({state.policy_stable_frames}/{self._hard_reject_stable_frames})")
-                    if not _ms_ok:
-                        _parts.append(f"stable_ms({_stable_elapsed_ms:.0f}/{self._hard_reject_stable_ms}ms)")
-                    _pending_reason = f"hard_reject_stabilizing({', '.join(_parts)})"
+            # Hard reject (WRONG_TYPE): never auto-commit — wait for the timeout reject instead.
+            _policy_action = "pending"
+            _pending_reason = "sticker_hard_reject_awaiting_timeout"
 
         else:
             # Non-hard reject (NOT_FOUND, gap, low conf, etc.) — never auto-commit.
@@ -1481,8 +1337,8 @@ class InspectionSessionService:
 
         # ── Timeout reject ──
         # Jika part sudah settled tapi tidak ada accept-commit dalam waktu reject_timeout_ms
-        # For sticker mode: also allow timeout reject for hard rejects (OUT_OF_ANGLE, WRONG_TYPE)
-        _allow_timeout_for_hard_reject = is_sticker and _is_hard_reject
+        # Hard rejects (WRONG_TYPE) are also allowed to commit via the timeout path.
+        _allow_timeout_for_hard_reject = _is_hard_reject
         if (
             not _commit_allowed
             and (not _is_hard_reject or _allow_timeout_for_hard_reject)
@@ -1588,9 +1444,6 @@ class InspectionSessionService:
             # Reset ratio history — prevent stale ratios from contaminating next cycle
             state.part_ready_ratio_history.clear()
             state.part_ready_ema_ratio = -1.0
-            # Reset adaptive HSV thresholds — start fresh for next cycle
-            state.hsv_adaptive_lower = None
-            state.hsv_adaptive_upper = None
             # Notify PLC worker of inspection decision
             # Only commit to PLC for accept or hard reject (not non-hard reject)
             decision = validation.get("decision", "")
@@ -1650,21 +1503,6 @@ class InspectionSessionService:
                     "result_id": _result_id,
                     "status": "pending",
                 }
-            # Component-count REJECT → also log to daily JSONL
-            _val_details = validation.get("validation_details") or {}
-            if (
-                _val_details.get("mode") == "component_count"
-                and validation.get("decision") == "REJECT"
-                and self._ng_logger is not None
-            ):
-                self._ng_logger.log_ng(
-                    session_id=state.session_id,
-                    event_id=event_id,
-                    mode="component_count",
-                    part_type=state.template.sticker.part_name,
-                    reject_reason=validation.get("reject_reason_code"),
-                    per_roi=_val_details.get("component_rois", []),
-                )
             self._register_committed_result(
                 state=state,
                 validation=validation,
@@ -1788,8 +1626,6 @@ class InspectionSessionService:
             "y": base.y,
             "w": base.w,
             "h": base.h,
-            "width": base.width,
-            "height": None,
         }
         payload.update(override)
         return payload
@@ -1842,16 +1678,6 @@ class InspectionSessionService:
         x2 = min(width, x + roi_w)
         y2 = min(height, y + roi_h)
         cropped = frame[y:y2, x:x2]
-        rotation = float(roi.get("rotation", 0.0) or 0.0)
-        if abs(rotation) > 0.1:
-            ch, cw = cropped.shape[:2]
-            center = (cw / 2, ch / 2)
-            M = cv2.getRotationMatrix2D(center, -rotation, 1.0)
-            cropped = cv2.warpAffine(
-                cropped, M, (cw, ch),
-                flags=cv2.INTER_LINEAR,
-                borderMode=cv2.BORDER_REPLICATE,
-            )
         meta = {"x": x, "y": y, "width": x2 - x, "height": y2 - y}
         return cropped, meta
 
@@ -1884,7 +1710,6 @@ class InspectionSessionService:
             frame,
             state.template.vision,
             expected_class=state.template.sticker.expected_class,
-            sticker_rule=state.template.sticker,
         )
 
     def _build_sticker_detection_payload(
@@ -1900,9 +1725,6 @@ class InspectionSessionService:
         fallback_reason: str | None = None,
         raw_detection_count: int | None = None,
         allowed_labels_filter: list[str] | None = None,
-        anchor: dict[str, Any] | None = None,
-        ocr: dict[str, Any] | None = None,
-        geometry: dict[str, Any] | None = None,
         stage_timings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         best = max(detections, key=lambda item: float(item.get("confidence") or 0.0), default=None)
@@ -1917,9 +1739,6 @@ class InspectionSessionService:
             "count": len(detections),
             "raw_detection_count": raw_detection_count,
             "allowed_labels_filter": allowed_labels_filter,
-            "anchor": dict(anchor or {}),
-            "ocr": dict(ocr or {}),
-            "geometry": dict(geometry or {}),
             "stage_timings": dict(stage_timings or {}),
             "items": detections,
             "best": best,
@@ -2057,157 +1876,6 @@ class InspectionSessionService:
             "gap_location": result.get("location", (0, 0)),
         }
 
-    def _evaluate_part_ready_color(self, frame, state: SessionState, config) -> dict[str, Any]:
-        """Legacy color profile match."""
-        if not config.color_profile_id:
-            return {
-                "enabled": False,
-                "part_ready": True,
-                "part_ready_confidence": 1.0,
-                "decision": DecisionCode.ACCEPT.value,
-                "reject_reason_code": None,
-                "status": "skipped",
-                "match_ratio": None,
-                "mean_distance": None,
-                "color_profile_id": None,
-                "gap_score": None,
-            }
-        record = self._profiles_repo.get(config.color_profile_id)
-        if not record:
-            return {
-                "enabled": True,
-                "part_ready": True,
-                "part_ready_confidence": 1.0,
-                "decision": DecisionCode.ACCEPT.value,
-                "reject_reason_code": None,
-                "status": "missing_profile_bypass",
-                "match_ratio": 1.0,
-                "mean_distance": None,
-                "color_profile_id": config.color_profile_id,
-                "gap_score": None,
-            }
-        evaluation = evaluate_color_profile_match(frame, config=config, profile=record["profile"])
-        raw_ratio = float(evaluation["match_ratio"])
-        # EMA smoothing — more responsive to current conditions than simple average
-        _ema_alpha = max(0.0, min(1.0, float(getattr(config, "ema_alpha", 0.3) or 0.3)))
-        if state.part_ready_ema_ratio < 0.0:
-            # First reading in cycle — initialize EMA with raw value
-            state.part_ready_ema_ratio = raw_ratio
-        else:
-            state.part_ready_ema_ratio = round(
-                _ema_alpha * raw_ratio + (1.0 - _ema_alpha) * state.part_ready_ema_ratio, 6
-            )
-        smoothed_ratio = state.part_ready_ema_ratio
-        resolved_min = float(evaluation["min_match_ratio"])
-        ready = smoothed_ratio >= resolved_min
-        return {
-            **evaluation,
-            "part_ready": ready,
-            "part_ready_confidence": smoothed_ratio,
-            "decision": DecisionCode.ACCEPT.value if ready else DecisionCode.REJECT.value,
-            "reject_reason_code": None if ready else RejectReasonCode.PART_NOT_READY.value,
-            "status": "ready" if ready else "not_ready",
-            "match_ratio": smoothed_ratio,
-            "raw_match_ratio": raw_ratio,
-            "min_match_ratio": resolved_min,
-            "gap_score": None,
-        }
-
-    def _evaluate_part_ready_hsv(self, frame, state: SessionState, config) -> dict[str, Any]:
-        """Legacy HSV black ratio with optional adaptive threshold."""
-        # ── Adaptive HSV threshold ──
-        # When enabled, slowly adjust hsv_lower/hsv_upper toward the current
-        # frame's actual HSV distribution so the threshold tracks lighting drift.
-        _hsv_adaptive = bool(getattr(config, "hsv_adaptive", False))
-        _adaptive_alpha = max(0.0, min(1.0, float(getattr(config, "hsv_adaptive_alpha", 0.1) or 0.1)))
-        _adaptive_min_ratio = float(getattr(config, "hsv_adaptive_min_ratio", 0.85) or 0.85)
-        if _hsv_adaptive and frame is not None and getattr(frame, "size", 0) > 0:
-            try:
-                from backend.app.services.part_ready_detector import compute_hsv_reference_from_roi
-                _live_ref = compute_hsv_reference_from_roi(frame)
-                _live_lower = _live_ref["hsv_lower"]
-                _live_upper = _live_ref["hsv_upper"]
-                if state.hsv_adaptive_lower is None:
-                    # First frame — initialize from config defaults
-                    state.hsv_adaptive_lower = list(_hsv_bounds(getattr(config, "hsv_lower", None), (0, 0, 0)))
-                    state.hsv_adaptive_upper = list(_hsv_bounds(getattr(config, "hsv_upper", None), (180, 255, 80)))
-                else:
-                    # EMA update toward live reference
-                    state.hsv_adaptive_lower = [
-                        round((1.0 - _adaptive_alpha) * state.hsv_adaptive_lower[i] + _adaptive_alpha * _live_lower[i], 1)
-                        for i in range(3)
-                    ]
-                    state.hsv_adaptive_upper = [
-                        round((1.0 - _adaptive_alpha) * state.hsv_adaptive_upper[i] + _adaptive_alpha * _live_upper[i], 1)
-                        for i in range(3)
-                    ]
-                # Only apply adaptive thresholds when current ratio is above minimum
-                # (prevents adapting to a wrong/no-part frame)
-                _raw_for_check = evaluate_hsv_black_ratio(frame, config)
-                if float(_raw_for_check["match_ratio"]) >= _adaptive_min_ratio:
-                    # Use adaptive bounds directly for re-evaluation
-                    import cv2 as _cv2
-                    import numpy as _np
-                    _hsv = _cv2.cvtColor(frame, _cv2.COLOR_BGR2HSV)
-                    _lower = _np.array(state.hsv_adaptive_lower, dtype=_np.uint8)
-                    _upper = _np.array(state.hsv_adaptive_upper, dtype=_np.uint8)
-                    _mask = _cv2.inRange(_hsv, _lower, _upper)
-                    _adaptive_ratio = float(_np.count_nonzero(_mask) / max(1, _mask.size))
-                    evaluation = {
-                        "enabled": True,
-                        "method": "hsv_black_ratio",
-                        "part_ready": _adaptive_ratio >= _adaptive_min_ratio,
-                        "part_ready_confidence": round(_adaptive_ratio, 6),
-                        "decision": DecisionCode.ACCEPT.value if _adaptive_ratio >= _adaptive_min_ratio else DecisionCode.REJECT.value,
-                        "reject_reason_code": None if _adaptive_ratio >= _adaptive_min_ratio else RejectReasonCode.PART_NOT_READY.value,
-                        "status": "ready" if _adaptive_ratio >= _adaptive_min_ratio else "not_ready",
-                        "match_ratio": round(_adaptive_ratio, 6),
-                        "raw_match_ratio": round(_adaptive_ratio, 6),
-                        "mean_distance": None,
-                        "distance_threshold": None,
-                        "min_match_ratio": _adaptive_min_ratio,
-                        "color_profile_id": getattr(config, "color_profile_id", None),
-                        "colorspace": "HSV",
-                        "hsv_lower": list(state.hsv_adaptive_lower),
-                        "hsv_upper": list(state.hsv_adaptive_upper),
-                        "hsv_adaptive": True,
-                    }
-                else:
-                    evaluation = _raw_for_check
-                    evaluation["hsv_adaptive"] = True
-                    evaluation["hsv_lower"] = list(state.hsv_adaptive_lower)
-                    evaluation["hsv_upper"] = list(state.hsv_adaptive_upper)
-            except Exception:
-                # Fallback to static evaluation on any error
-                evaluation = evaluate_hsv_black_ratio(frame, config)
-                evaluation["hsv_adaptive"] = False
-        else:
-            evaluation = evaluate_hsv_black_ratio(frame, config)
-            evaluation["hsv_adaptive"] = False
-
-        raw_ratio = float(evaluation["match_ratio"])
-        # EMA smoothing — more responsive to current conditions than simple average
-        _ema_alpha = max(0.0, min(1.0, float(getattr(config, "ema_alpha", 0.3) or 0.3)))
-        if state.part_ready_ema_ratio < 0.0:
-            state.part_ready_ema_ratio = raw_ratio
-        else:
-            state.part_ready_ema_ratio = round(
-                _ema_alpha * raw_ratio + (1.0 - _ema_alpha) * state.part_ready_ema_ratio, 6
-            )
-        smoothed_ratio = state.part_ready_ema_ratio
-        resolved_min = float(evaluation["min_match_ratio"])
-        ready = smoothed_ratio >= resolved_min
-        evaluation.update({
-            "part_ready": ready,
-            "part_ready_confidence": smoothed_ratio,
-            "decision": DecisionCode.ACCEPT.value if ready else DecisionCode.REJECT.value,
-            "reject_reason_code": None if ready else RejectReasonCode.PART_NOT_READY.value,
-            "status": "ready" if ready else "not_ready",
-            "match_ratio": smoothed_ratio,
-            "raw_match_ratio": raw_ratio,
-        })
-        return evaluation
-
     def _evaluate_part_ready_mean_std(self, frame, state: SessionState, config) -> dict[str, Any]:
         """"Mean + Std threshold classification.
 
@@ -2250,344 +1918,6 @@ class InspectionSessionService:
 
     def _normalize_label(self, value: Any) -> str:
         return str(value or "").strip().lower()
-
-    @staticmethod
-    def _normalize_tilt_180(angle: float | None) -> float | None:
-        if angle is None:
-            return None
-        normalized = float(angle)
-        while normalized > 90.0:
-            normalized -= 180.0
-        while normalized < -90.0:
-            normalized += 180.0
-        if abs(normalized) == 0:
-            normalized = 0.0
-        return round(normalized, 2)
-
-    @staticmethod
-    def _normalize_code(value: Any) -> str:
-        return "".join(ch for ch in str(value or "").strip().lower() if ch.isalnum())
-
-    @staticmethod
-    def _ocr_validation_fields(detection_payload: dict[str, Any]) -> dict[str, Any]:
-        return {}
-        anchor = detection_payload.get("anchor") or {}
-        geometry = detection_payload.get("geometry") or {}
-        return {
-            "text_bbox": anchor.get("text_bbox"),
-            "dot_bbox": anchor.get("dot_bbox"),
-            "dot_position": geometry.get("dot_position") or anchor.get("dot_position"),
-            "anchor_offset": geometry.get("anchor_offset"),
-            "pose_angle": geometry.get("pose_angle"),
-        }
-
-    def _validate_ocr_anchor(
-        self,
-        *,
-        state: SessionState,
-        detection_payload: dict[str, Any],
-        part_ready_payload: dict[str, Any],
-        username: str | None,
-        user_id: int | None,
-        line_id: str,
-        thresholds: dict[str, Any],
-        detection_context: dict[str, Any],
-        max_tilt_degrees_value: float | None,
-    ) -> dict[str, Any]:
-        sticker = state.template.sticker
-        anchor = detection_payload.get("anchor") or {}
-        ocr = detection_payload.get("ocr") or {}
-        geometry = detection_payload.get("geometry") or {}
-
-        anchor_min_confidence = (
-            thresholds["min_roi_confidence"]
-            if getattr(sticker, "anchor_min_confidence", None) is None
-            else float(getattr(sticker, "anchor_min_confidence") or 0.0)
-        )
-        dot_min_confidence = (
-            anchor_min_confidence
-            if getattr(sticker, "dot_min_confidence", None) is None
-            else float(getattr(sticker, "dot_min_confidence") or 0.0)
-        )
-        ocr_min_confidence = (
-            self._default_ocr_min_confidence
-            if getattr(sticker, "ocr_min_confidence", None) is None
-            else float(getattr(sticker, "ocr_min_confidence") or 0.0)
-        )
-        offset_limit_x = (
-            getattr(sticker, "max_anchor_offset_x", None)
-            if getattr(sticker, "max_anchor_offset_x", None) is not None
-            else sticker.max_offset_x
-        )
-        offset_limit_y = (
-            getattr(sticker, "max_anchor_offset_y", None)
-            if getattr(sticker, "max_anchor_offset_y", None) is not None
-            else sticker.max_offset_y
-        )
-        offset_x = None
-        offset_y = None
-        anchor_offset = geometry.get("anchor_offset") or {}
-        if anchor_offset:
-            offset_x = float(anchor_offset.get("x", 0.0))
-            offset_y = float(anchor_offset.get("y", 0.0))
-
-        reject_reason = None
-        if anchor.get("text_anchor") is None or anchor.get("center_dot") is None:
-            reject_reason = RejectReasonCode.ANCHOR_NOT_FOUND.value
-        elif float(anchor.get("text_confidence") or 0.0) < anchor_min_confidence:
-            reject_reason = RejectReasonCode.LOW_ROI_CONF.value
-        elif float(anchor.get("dot_confidence") or 0.0) < dot_min_confidence:
-            reject_reason = RejectReasonCode.LOW_ROI_CONF.value
-        elif str(ocr.get("status") or "") != "ok":
-            reject_reason = RejectReasonCode.LOW_OCR_CONF.value
-        elif ocr.get("confidence") is not None and float(ocr.get("confidence") or 0.0) < ocr_min_confidence:
-            reject_reason = RejectReasonCode.LOW_OCR_CONF.value
-        elif not bool(ocr.get("match_expected")):
-            reject_reason = RejectReasonCode.WRONG_TEXT.value
-        elif offset_x is None or offset_y is None:
-            # Dot tidak terdeteksi — skip OUT_OF_POSITION (tidak ada dot)
-            # Langsung cek OUT_OF_ANGLE jika enabled
-            pass  # lanjut ke cek angle di bawah
-        elif (
-            thresholds["tilt_gate_enabled"]
-            and max_tilt_degrees_value is not None
-            and geometry.get("pose_deviation") is not None
-            and float(geometry.get("pose_deviation") or 0.0) > max_tilt_degrees_value
-        ):
-            reject_reason = RejectReasonCode.OUT_OF_ANGLE.value
-
-        decision = DecisionCode.ACCEPT.value if reject_reason is None else DecisionCode.REJECT.value
-        status = "accepted" if reject_reason is None else reject_reason.lower()
-        detected_text = ocr.get("canonical_text") or ocr.get("text")
-        selected_candidate = {
-            "label": detected_text,
-            "normalized_label": self._normalize_label(detected_text),
-            "confidence": ocr.get("confidence"),
-            "class_confidence": ocr.get("confidence"),
-            "bbox": anchor.get("text_bbox"),
-            "center": geometry.get("dot_position") or anchor.get("dot_position"),
-            "offset": {"x": round(offset_x or 0.0, 2), "y": round(offset_y or 0.0, 2)} if offset_x is not None and offset_y is not None else None,
-            "match_expected": bool(ocr.get("match_expected")),
-            "source": "ocr_anchor",
-        }
-        target = {
-            "target_id": "target-1",
-            "part_name": sticker.part_name,
-            "expected_class": sticker.expected_class,
-            "detected_class": detected_text,
-            "decision": decision,
-            "decision_code": decision,
-            "reject_reason_code": reject_reason,
-            "data1": ocr.get("confidence"),
-            "data2": anchor.get("dot_confidence"),
-            "position": geometry.get("dot_position") or {},
-            "offset": selected_candidate.get("offset") or {},
-            "candidate_source": "ocr_anchor",
-        }
-        return {
-            "decision": decision,
-            "decision_code": decision,
-            "reject_reason_code": reject_reason,
-            "part_name": sticker.part_name,
-            "line_id": line_id,
-            "station_id": state.station_id,
-            "data1": part_ready_payload.get("part_ready_confidence"),
-            "data2": ocr.get("confidence"),
-            "targets": [target],
-            "operator_user_id": user_id,
-            "mp_check": username,
-            "detected_class": detected_text,
-            "expected_class": sticker.expected_class,
-            "sticker_confidence": ocr.get("confidence"),
-            "sticker_bbox": anchor.get("text_bbox"),
-            "sticker_backend": detection_context["backend"],
-            "sticker_tilt_angle": geometry.get("pose_angle"),
-            "sticker_tilt_expected": thresholds["expected_tilt_degrees"],
-            "sticker_tilt_deviation": geometry.get("pose_deviation"),
-            "sticker_tilt_threshold": max_tilt_degrees_value,
-            "validation_details": {
-                "status": status,
-                "candidate_source": "ocr_anchor",
-                "selected_candidate": selected_candidate,
-                "candidate_count": int(detection_payload.get("count") or 0),
-                "matching_candidate_count": 1 if ocr.get("match_expected") else 0,
-                "expected_center": geometry.get("expected_dot_position"),
-                "tilt": {
-                    "status": geometry.get("status"),
-                    "angle_degrees": geometry.get("pose_angle"),
-                    "expected_tilt_degrees": thresholds["expected_tilt_degrees"],
-                    "deviation_degrees": geometry.get("pose_deviation"),
-                    "source": "anchor_geometry",
-                },
-                "thresholds": {
-                    **thresholds,
-                    "anchor_min_confidence": anchor_min_confidence,
-                    "dot_min_confidence": dot_min_confidence,
-                    "ocr_min_confidence": ocr_min_confidence,
-                    "max_anchor_offset_x": None if offset_limit_x is None else float(offset_limit_x),
-                    "max_anchor_offset_y": None if offset_limit_y is None else float(offset_limit_y),
-                },
-                "ocr": ocr,
-                "anchor": anchor,
-                "geometry": geometry,
-                "model": detection_context,
-            },
-        }
-
-    def _validate_sticker_ocr_only(
-        self,
-        *,
-        roi_frame,
-        state: SessionState,
-        detections: list[dict[str, Any]],
-        detection_payload: dict[str, Any],
-        part_ready_payload: dict[str, Any],
-        username: str | None,
-        user_id: int | None,
-        line_id: str,
-        thresholds: dict[str, Any],
-        detection_context: dict[str, Any],
-        max_tilt_degrees_value: float | None,
-    ) -> dict[str, Any]:
-        sticker = state.template.sticker
-        candidates, expected_center = self._build_validation_candidate_summaries(
-            detections,
-            roi_frame,
-            sticker.expected_class,
-            sticker,
-        )
-        selected_candidate, candidate_source = self._select_validation_candidate(candidates)
-        matching_candidate_count = sum(1 for item in candidates if item.get("match_expected"))
-
-        tilt_info = dict(detection_payload.get("tilt_info") or {})
-        geometry = detection_payload.get("geometry") or {}
-        if not tilt_info:
-            tilt_info = {
-                "status": geometry.get("status"),
-                "angle_degrees": geometry.get("pose_angle"),
-                "expected_tilt_degrees": thresholds["expected_tilt_degrees"],
-                "deviation_degrees": geometry.get("pose_deviation"),
-                "source": "sticker_only_geometry",
-            }
-        raw_angle = tilt_info.get("angle_degrees")
-        normalized_angle = self._normalize_tilt_180(None if raw_angle is None else float(raw_angle))
-        expected_tilt = float(thresholds["expected_tilt_degrees"] or 0.0)
-        normalized_deviation = None
-        if normalized_angle is not None:
-            normalized_deviation = round(abs(float(normalized_angle) - expected_tilt), 2)
-        tilt_info["normalized_angle_degrees"] = normalized_angle
-        tilt_info["normalized_deviation_degrees"] = normalized_deviation
-
-        anchor_offset = geometry.get("anchor_offset") or {}
-        if not anchor_offset and selected_candidate is not None:
-            anchor_offset = selected_candidate.get("offset") or {}
-        offset_x = float(anchor_offset.get("x", 0.0)) if anchor_offset else 0.0
-        offset_y = float(anchor_offset.get("y", 0.0)) if anchor_offset else 0.0
-        offset_limit_x = (
-            getattr(sticker, "max_anchor_offset_x", None)
-            if getattr(sticker, "max_anchor_offset_x", None) is not None
-            else thresholds["max_offset_x"]
-        )
-        offset_limit_y = (
-            getattr(sticker, "max_anchor_offset_y", None)
-            if getattr(sticker, "max_anchor_offset_y", None) is not None
-            else thresholds["max_offset_y"]
-        )
-
-        ocr_payload = detection_payload.get("ocr") or {}
-        unique_code = str(detection_payload.get("unique_code") or "").strip()
-        reject_reason = None
-        if selected_candidate is None:
-            reject_reason = RejectReasonCode.NOT_FOUND.value
-        elif float(selected_candidate.get("confidence") or 0.0) < thresholds["min_roi_confidence"]:
-            reject_reason = RejectReasonCode.LOW_ROI_CONF.value
-        elif not bool(selected_candidate.get("match_expected")):
-            reject_reason = RejectReasonCode.WRONG_TYPE.value
-        elif thresholds["min_class_confidence"] is not None and float(selected_candidate.get("class_confidence") or 0.0) < float(thresholds["min_class_confidence"]):
-            reject_reason = RejectReasonCode.LOW_CLASS_CONF.value
-        elif thresholds["tilt_gate_enabled"] and max_tilt_degrees_value is not None and normalized_deviation is not None and normalized_deviation > max_tilt_degrees_value:
-            reject_reason = RejectReasonCode.OUT_OF_ANGLE.value
-        elif offset_limit_x is not None and abs(offset_x) > float(offset_limit_x):
-            reject_reason = RejectReasonCode.OUT_OF_POSITION.value
-        elif offset_limit_y is not None and abs(offset_y) > float(offset_limit_y):
-            reject_reason = RejectReasonCode.OUT_OF_POSITION.value
-
-        # Only allow hard reject reasons; suppress all others
-        _hard_rejects = {
-            RejectReasonCode.WRONG_TYPE.value,
-            RejectReasonCode.OUT_OF_ANGLE.value,
-            RejectReasonCode.COMMIT_TIMEOUT.value,
-        }
-        if reject_reason is not None and reject_reason not in _hard_rejects:
-            reject_reason = None
-
-        decision = DecisionCode.ACCEPT.value if reject_reason is None else DecisionCode.REJECT.value
-        status = "accepted" if reject_reason is None else reject_reason.lower()
-        bbox = dict((selected_candidate or {}).get("bbox") or {}) or None
-        selected_label = None if selected_candidate is None else selected_candidate.get("label")
-        confidence = None if selected_candidate is None else selected_candidate.get("confidence")
-        selected_center = dict((selected_candidate or {}).get("center") or {})
-        selected_offset = {"x": round(offset_x, 2), "y": round(offset_y, 2)} if selected_candidate is not None else {}
-        target = {
-            "target_id": "target-1",
-            "part_name": sticker.part_name,
-            "expected_class": sticker.expected_class,
-            "detected_class": selected_label,
-            "decision": decision,
-            "decision_code": decision,
-            "reject_reason_code": reject_reason,
-            "data1": confidence,
-            "data2": None if selected_candidate is None else selected_candidate.get("class_confidence"),
-            "position": selected_center,
-            "offset": selected_offset,
-            "candidate_source": candidate_source,
-        }
-        result = {
-            "decision": decision,
-            "decision_code": decision,
-            "reject_reason_code": reject_reason,
-            "part_name": sticker.part_name,
-            "line_id": line_id,
-            "station_id": state.station_id,
-            "data1": part_ready_payload.get("part_ready_confidence"),
-            "data2": confidence,
-            "targets": [] if selected_candidate is None else [target],
-            "operator_user_id": user_id,
-            "mp_check": username,
-            "detected_class": selected_label,
-            "expected_class": sticker.expected_class,
-            "unique_code": unique_code,
-            "sticker_confidence": confidence,
-            "sticker_bbox": bbox,
-            "sticker_backend": detection_context["backend"],
-            "sticker_tilt_angle": normalized_angle,
-            "sticker_tilt_expected": expected_tilt,
-            "sticker_tilt_deviation": normalized_deviation,
-            "sticker_tilt_threshold": max_tilt_degrees_value,
-            "validation_details": {
-                "status": status,
-                "candidate_source": "sticker_only" if candidate_source == "expected_class" else candidate_source,
-                "selected_candidate": selected_candidate,
-                "candidate_count": len(candidates),
-                "matching_candidate_count": matching_candidate_count,
-                "expected_center": expected_center,
-                "tilt": tilt_info,
-                "thresholds": {
-                    **thresholds,
-                    "max_anchor_offset_x": None if offset_limit_x is None else float(offset_limit_x),
-                    "max_anchor_offset_y": None if offset_limit_y is None else float(offset_limit_y),
-                },
-                "candidates": candidates,
-                "ocr": ocr_payload,
-                "anchor": detection_payload.get("anchor") or {},
-                "geometry": geometry,
-                "unique_code": unique_code,
-                "model": detection_context,
-            },
-        }
-        for key, value in self._ocr_validation_fields(detection_payload).items():
-            result[key] = value
-        return result
 
     def _build_validation_candidate_summaries(
         self,
@@ -2661,96 +1991,10 @@ class InspectionSessionService:
         part_ready_payload: dict[str, Any],
         username: str | None,
         user_id: int | None,
-        full_frame=None,
     ) -> dict[str, Any]:
         sticker = state.template.sticker
-        validator_mode = str(getattr(sticker, "validator_mode", "ml_detection") or "ml_detection").strip().lower()
 
-        # Map legacy validator_mode values to evaluator mode names
-        _mode_map = {
-            "ml_detection": "sticker",
-            "component_count": "counter",
-            "ml_roi_class": "sticker",
-            "ml_roi_classification": "sticker",
-            "roi_class": "sticker",
-            "roi_partial": "sticker",
-            "defect": "defect",
-        }
-        evaluator_mode = _mode_map.get(validator_mode, "sticker")
-
-        # If a dedicated evaluator exists, use it instead of inline logic
-        if evaluator_mode != "sticker":
-            from backend.app.services.evaluators.registry import get_evaluator as _get_eval
-            from backend.app.services.evaluators.base import EvalContext
-            # Build mode-specific EvalContext
-            if evaluator_mode == "counter":
-                _criteria = state.template.criteria if state.template.criteria else {
-                    "component_rois": [
-                        {
-                            "name": cr.name,
-                            "classes": [
-                                {
-                                    "class_name": ct.class_name,
-                                    "count": ct.count,
-                                    "min_count": ct.min_count,
-                                    "max_count": ct.max_count,
-                                }
-                                for ct in cr.classes
-                            ],
-                            "strict_foreign_class": cr.strict_foreign_class,
-                        }
-                        for cr in state.template.component_rois
-                    ],
-                }
-                _frame = None
-            elif evaluator_mode == "defect":
-                _criteria = state.template.criteria if state.template.criteria else {"rois": []}
-                # Frame required for defect (crop ROIs per camera geometry)
-                _frame = full_frame
-            else:
-                _criteria = {}
-                _frame = None
-
-            _ctx = EvalContext(
-                detections=detections,
-                frame=_frame,
-                criteria=_criteria,
-                state=state,
-                additional={
-                    "accept_stable_frames": self._accept_stable_frames,
-                },
-            )
-            try:
-                _eval = _get_eval(evaluator_mode)
-                _decision = _eval.evaluate(_ctx)
-            except NotImplementedError:
-                # If evaluator raises NotImplemented, fall through to old logic
-                _decision = None
-
-            if _decision is not None:
-                # Convert Decision back to old dict format
-                _is_accept = _decision.accept
-                _reason = _decision.reason_code
-                _details = _decision.details
-
-                _decision_str = DecisionCode.ACCEPT.value if _is_accept else DecisionCode.REJECT.value
-                result = {
-                    "decision": _decision_str,
-                    "decision_code": _decision_str,
-                    "reject_reason_code": _reason if not _is_accept else None,
-                    "validation_details": _details,
-                }
-                # Counter mode: early return — evaluator handles stability internally
-                if _details.get("mode") == "counter":
-                    return result
-
-        position_gate_enabled = validator_mode not in ROI_CLASS_VALIDATOR_MODES
         line_id = state.line_id
-        expected_tilt_degrees = float(getattr(sticker, "expected_tilt_degrees", 0.0) or 0.0)
-        max_tilt_degrees = getattr(sticker, "max_tilt_degrees", None)
-        max_tilt_degrees_value = None if max_tilt_degrees is None else float(max_tilt_degrees)
-        tilt_gate_enabled = bool(getattr(sticker, "tilt_gate_enabled", False))
-        tilt_info = _estimate_tilt_from_roi(roi_frame, expected_tilt_degrees, sticker)
         thresholds = {
             "min_roi_confidence": float(sticker.min_roi_confidence or 0.0),
             "min_class_confidence": (
@@ -2758,11 +2002,6 @@ class InspectionSessionService:
             ),
             "max_offset_x": None if sticker.max_offset_x is None else float(sticker.max_offset_x),
             "max_offset_y": None if sticker.max_offset_y is None else float(sticker.max_offset_y),
-            "validator_mode": validator_mode,
-            "position_gate_enabled": position_gate_enabled,
-            "tilt_gate_enabled": tilt_gate_enabled,
-            "max_tilt_degrees": max_tilt_degrees_value,
-            "expected_tilt_degrees": expected_tilt_degrees,
         }
         detection_context = {
             "backend": detection_payload.get("backend"),
@@ -2790,10 +2029,6 @@ class InspectionSessionService:
                 "sticker_confidence": None,
                 "sticker_bbox": None,
                 "sticker_backend": detection_context["backend"],
-                "sticker_tilt_angle": tilt_info.get("angle_degrees"),
-                "sticker_tilt_expected": tilt_info.get("expected_tilt_degrees"),
-                "sticker_tilt_deviation": tilt_info.get("deviation_degrees"),
-                "sticker_tilt_threshold": max_tilt_degrees_value,
                 "validation_details": {
                     "status": "disabled",
                     "candidate_source": "none",
@@ -2801,83 +2036,9 @@ class InspectionSessionService:
                     "candidate_count": len(detections),
                     "matching_candidate_count": 0,
                     "expected_center": None,
-                    "tilt": tilt_info,
                     "thresholds": thresholds,
                 },
             }
-#         if not part_ready_payload.get("part_ready", False):
-#             return {
-#                 "decision": DecisionCode.REJECT.value,
-#                 "decision_code": DecisionCode.REJECT.value,
-#                 "reject_reason_code": RejectReasonCode.PART_NOT_READY.value,
-#                 "part_name": sticker.part_name,
-#                 "line_id": line_id,
-#                 "station_id": state.station_id,
-#                 # Contract: data1 = part_ready confidence, data2 = sticker confidence
-#                 "data1": part_ready_payload.get("part_ready_confidence"),
-#                 "data2": None,
-#                 "targets": [],
-#                 "operator_user_id": user_id,
-#                 "mp_check": username,
-#                 "detected_class": None,
-#                 "expected_class": sticker.expected_class,
-#                 "sticker_confidence": None,
-#                 "sticker_bbox": None,
-#                 "sticker_backend": detection_context["backend"],
-#                 "sticker_tilt_angle": tilt_info.get("angle_degrees"),
-#                 "sticker_tilt_expected": tilt_info.get("expected_tilt_degrees"),
-#                 "sticker_tilt_deviation": tilt_info.get("deviation_degrees"),
-#                 "sticker_tilt_threshold": max_tilt_degrees_value,
-#                 "validation_details": {
-#                     "status": "part_not_ready",
-#                     "candidate_source": "none",
-#                     "selected_candidate": None,
-#                     "candidate_count": len(detections),
-#                     "matching_candidate_count": 0,
-#                     "expected_center": None,
-#                     "tilt": tilt_info,
-#                     "thresholds": thresholds,
-#                 },
-#             }
-        # NOTE: Do NOT return early on no detections — let flow continue to
-        # _validate_sticker which handles selected_candidate=None as NOT_FOUND,
-        # and the commit gate will keep it as pending (never auto-commit).
-        # Returning here bypasses the commit gate and causes immediate REJECT.
-        #
-        # if not detections:
-        #     return {
-        #         "decision": DecisionCode.REJECT.value,
-        #         "decision_code": DecisionCode.REJECT.value,
-        #         "reject_reason_code": RejectReasonCode.NOT_FOUND.value,
-        #         "part_name": sticker.part_name,
-        #         "line_id": line_id,
-        #         "station_id": state.station_id,
-        #         "data1": part_ready_payload.get("part_ready_confidence"),
-        #         "data2": None,
-        #         "targets": [],
-        #         "operator_user_id": user_id,
-        #         "mp_check": username,
-        #         "detected_class": None,
-        #         "expected_class": sticker.expected_class,
-        #         "sticker_confidence": None,
-        #         "sticker_bbox": None,
-        #         "sticker_backend": detection_context["backend"],
-        #         "sticker_tilt_angle": tilt_info.get("angle_degrees"),
-        #         "sticker_tilt_expected": tilt_info.get("expected_tilt_degrees"),
-        #         "sticker_tilt_deviation": tilt_info.get("deviation_degrees"),
-        #         "sticker_tilt_threshold": max_tilt_degrees_value,
-        #         "validation_details": {
-        #             "status": "inferring",
-        #             "candidate_source": "none",
-        #             "selected_candidate": None,
-        #             "candidate_count": 0,
-        #             "matching_candidate_count": 0,
-        #             "expected_center": None,
-        #             "tilt": tilt_info,
-        #             "thresholds": thresholds,
-        #         },
-        #     }
-
         candidates, expected_center = self._build_validation_candidate_summaries(
             detections,
             roi_frame,
@@ -2907,10 +2068,6 @@ class InspectionSessionService:
                 "sticker_confidence": None,
                 "sticker_bbox": None,
                 "sticker_backend": detection_context["backend"],
-                "sticker_tilt_angle": tilt_info.get("angle_degrees"),
-                "sticker_tilt_expected": tilt_info.get("expected_tilt_degrees"),
-                "sticker_tilt_deviation": tilt_info.get("deviation_degrees"),
-                "sticker_tilt_threshold": max_tilt_degrees_value,
                 "validation_details": {
                     "status": "inferring",
                     "candidate_source": "none",
@@ -2918,7 +2075,6 @@ class InspectionSessionService:
                     "candidate_count": len(candidates),
                     "matching_candidate_count": matching_candidate_count,
                     "expected_center": expected_center,
-                    "tilt": tilt_info,
                     "thresholds": thresholds,
                     "candidates": candidates,
                 },
@@ -2933,16 +2089,9 @@ class InspectionSessionService:
             reject_reason = RejectReasonCode.WRONG_TYPE.value
         elif thresholds["min_class_confidence"] is not None and float(selected_candidate.get("class_confidence") or 0.0) < float(thresholds["min_class_confidence"]):
             reject_reason = RejectReasonCode.LOW_CLASS_CONF.value
-        elif tilt_gate_enabled and max_tilt_degrees_value is not None and tilt_info.get("angle_degrees") is not None and float(tilt_info.get("deviation_degrees") or 0.0) > max_tilt_degrees_value:
-            reject_reason = RejectReasonCode.OUT_OF_ANGLE.value
-        elif tilt_gate_enabled and max_tilt_degrees_value is not None:
-            # Also check if text-band edge sticks out of ROI (even if angle is OK)
-            roi_check = (tilt_info or {}).get("text_band_roi_check") or {}
-            if roi_check and not roi_check.get("is_inside", True):
-                reject_reason = RejectReasonCode.OUT_OF_ANGLE.value
-        elif position_gate_enabled and thresholds["max_offset_x"] is not None and abs(offset_x) > float(thresholds["max_offset_x"]):
+        elif thresholds["max_offset_x"] is not None and abs(offset_x) > float(thresholds["max_offset_x"]):
             reject_reason = RejectReasonCode.OUT_OF_POSITION.value
-        elif position_gate_enabled and thresholds["max_offset_y"] is not None and abs(offset_y) > float(thresholds["max_offset_y"]):
+        elif thresholds["max_offset_y"] is not None and abs(offset_y) > float(thresholds["max_offset_y"]):
             reject_reason = RejectReasonCode.OUT_OF_POSITION.value
         decision = DecisionCode.ACCEPT.value if reject_reason is None else DecisionCode.REJECT.value
         status = "accepted" if reject_reason is None else reject_reason.lower()
@@ -2978,10 +2127,6 @@ class InspectionSessionService:
             "sticker_confidence": selected_candidate.get("confidence"),
             "sticker_bbox": dict(selected_candidate.get("bbox") or {}) or None,
             "sticker_backend": detection_context["backend"],
-            "sticker_tilt_angle": tilt_info.get("angle_degrees"),
-            "sticker_tilt_expected": tilt_info.get("expected_tilt_degrees"),
-            "sticker_tilt_deviation": tilt_info.get("deviation_degrees"),
-            "sticker_tilt_threshold": max_tilt_degrees_value,
             "validation_details": {
                 "status": status,
                 "candidate_source": candidate_source,
@@ -2989,28 +2134,12 @@ class InspectionSessionService:
                 "candidate_count": len(candidates),
                 "matching_candidate_count": matching_candidate_count,
                 "expected_center": expected_center,
-                "tilt": tilt_info,
                 "thresholds": thresholds,
                 "candidates": candidates,
                 "model": detection_context,
             },
         }
 
-    def _advance_event_state(
-        self,
-        *,
-        state: SessionState,
-        validation: dict[str, Any],
-        part_ready_payload: dict[str, Any],
-        presence: dict[str, Any],
-        now: datetime,
-        commit_allowed: bool = False,
-    ) -> tuple[str, str | None, bool]:
-        if not presence.get("present", False):
-            state.current_presence = False
-            state.current_event_id = None
-            state.current_event_key = None
-            state.current_event_started_at = None
     def _advance_event_state(
         self,
         *,
@@ -3383,46 +2512,3 @@ class InspectionSessionService:
         state.last_persisted_at = datetime.now(UTC)
         state.last_persisted_key = persist_key
         return {"written": True, "result_id": record["id"]}
-
-
-    # ---------------------------------------------------------------------------
-    # Component Count Mode — helpers
-    # ---------------------------------------------------------------------------
-
-    def _point_in_which_roi(self, cx: float, cy: float, component_rois: list) -> int:
-        """Return index of ROI containing normalized point (cx, cy), or -1.
-
-        Supports axis-aligned ROIs only (rotation not yet supported in assign path).
-        Point is in normalized [0,1] coordinates relative to full frame.
-        """
-        for idx, roi_rule in enumerate(component_rois):
-            roi = roi_rule.roi
-            rx, ry = float(roi.x), float(roi.y)
-            rw, rh = float(roi.w), float(roi.h)
-            if rw <= 0 or rh <= 0:
-                continue
-            if rx <= cx <= rx + rw and ry <= cy <= ry + rh:
-                return idx
-        return -1
-
-    def _assign_detections_to_component_rois(
-        self, detections: list[dict], component_rois: list, fw: int, fh: int
-    ) -> None:
-        """Assign tile_index to each detection based on center point falling inside ROI.
-
-        Reads det["position"] = {x1, y1, x2, y2} (pixel coords from inference backend).
-        Modifies detections in-place. Detections outside all ROIs get tile_index=-1.
-        """
-        if fw <= 0 or fh <= 0 or not component_rois:
-            for det in detections:
-                det["tile_index"] = -1
-            return
-        for det in detections:
-            pos = det.get("position") or {}
-            x1 = float(pos.get("x1", 0))
-            y1 = float(pos.get("y1", 0))
-            x2 = float(pos.get("x2", 0))
-            y2 = float(pos.get("y2", 0))
-            cx = ((x1 + x2) / 2.0) / float(fw)
-            cy = ((y1 + y2) / 2.0) / float(fh)
-

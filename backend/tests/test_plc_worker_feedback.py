@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from backend.app.models.machine_settings import MachineSettings, PlcIoConfig
 from backend.app.workers.plc_worker import PlcWorker
 
 
@@ -33,14 +34,18 @@ class _FakeAdapter:
         return {}
 
 
+def _worker_with_feedback(adapter) -> PlcWorker:
+    worker = PlcWorker(adapter, dry_run=True)
+    worker.apply_machine_settings(
+        MachineSettings(io=PlcIoConfig(clamp_feedback_enabled=True, input_clamp_engaged_address=2))
+    )
+    return worker
+
+
 class PlcWorkerFeedbackTest(unittest.TestCase):
     def test_input3_clamp_feedback_marks_worker_clamped(self) -> None:
         adapter = _FakeAdapter([False, False, True, False, False, False, False, False])
-        worker = PlcWorker(
-            adapter,
-            clamp_feedback_enabled=True,
-            input_clamp_engaged_address=2,
-        )
+        worker = _worker_with_feedback(adapter)
 
         worker._cmd_part_ready({"event_id": "evt-1"})  # noqa: SLF001
         worker._poll_inputs()  # noqa: SLF001
@@ -53,11 +58,7 @@ class PlcWorkerFeedbackTest(unittest.TestCase):
 
     def test_decision_is_allowed_after_clamped_feedback(self) -> None:
         adapter = _FakeAdapter([False, False, True, False, False, False, False, False])
-        worker = PlcWorker(
-            adapter,
-            clamp_feedback_enabled=True,
-            input_clamp_engaged_address=2,
-        )
+        worker = _worker_with_feedback(adapter)
         worker._cmd_part_ready({"event_id": "evt-1"})  # noqa: SLF001
         worker._poll_inputs()  # noqa: SLF001
 

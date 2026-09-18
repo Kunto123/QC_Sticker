@@ -3,9 +3,8 @@
 Greenfield QC suite in a separate folder, built as:
 
 - `backend/`: Flask API for auth, templates, deployments, inspection sessions, workstation, and dashboard
-- `client_tk/`: Tkinter desktop shell with role-based screens for Operator, Admin, and Engineer
+- `client_tk/`: Tkinter desktop shell with role-based screens for Operator and Admin
 - `shared/`: contracts and enums shared across backend and client
-- `docs/`: product, screens, API, and deployment notes
 - `scripts/`: run and smoke-test helpers
 
 Default runtime is local-first desktop: the client uses the embedded local transport by default, and split deployment is only needed for compatibility or remote access.
@@ -14,13 +13,11 @@ Default seeded users:
 
 - `admin / admin123`
 - `operator / operator123`
-- `engineer / engineer123`
 
 ## Role Screens
 
-- `Operator`: login, local camera, active deployment lookup, ROI update, live decision, tilt hard-reject status, DB write status
-- `Admin`: templates, deployments, users, inspection results, dashboard
-- `Engineer`: dataset upload, annotations, augment jobs, training jobs, model registry, portable model export/import, color calibration
+- `Operator`: login, local camera, active deployment lookup, ROI update, live decision, DB write status
+- `Admin`: templates, deployments, users, inspection results, dashboard, model registry (import zip / upload / export / delete), machine settings. Training is done in other software — this app only imports finished models.
 
 ## Cara Menjalankan
 
@@ -78,11 +75,14 @@ MSSQL_PASSWORD=...
 MSSQL_DRIVER=ODBC Driver 17 for SQL Server
 ```
 
-Jika model production belum siap, untuk smoke test lokal Anda bisa memakai:
+`.env` hanya berisi rahasia dan bootstrap (secret key, kredensial DB, data root, host/port,
+local-only). Semua setting operasional — koneksi & alamat I/O PLC, timing inspeksi, mode
+inferensi / model / device — ada di `data/json_store/machine_settings.json` dan diedit dari
+**Admin → Machine Settings**. Tidak ada satupun yang dibaca dari `.env`. PC baru memakai
+default (PLC off, dry-run, inference `auto`) sampai disimpan dari tab itu.
 
-```env
-QC_SUITE_STICKER_INFERENCE_MODE=classic
-```
+Jika model production belum siap, untuk smoke test lokal set **Machine Settings → Inference →
+Mode** ke `classic`.
 
 ### 4. Jalankan aplikasi
 
@@ -123,67 +123,42 @@ py -3.11 scripts/smoke_api.py
 py -3.11 -m unittest backend.tests.test_api_smoke
 ```
 
-Untuk smoke test UI:
+Untuk test client non-UI:
 
 ```powershell
 cd qc-suite-python
-py -3.11 -m unittest client_tk.tests.test_ui_smoke
+py -3.11 -m pytest client_tk/tests/test_async_bridge.py client_tk/tests/test_frame_upload.py -q
 ```
 
-## Remote I/O via Modbus TCP or RTU
+## PLC / Remote I/O (Modbus TCP, RTU, atau Mitsubishi FX)
 
-Pilih transport secara manual di `.env`: `tcp` untuk Modbus TCP gateway / Ethernet remote I/O, atau `rtu` untuk relay module serial RS232/RS485.
+Semua konfigurasi PLC ada di **Admin → Machine Settings** (`data/json_store/machine_settings.json`):
 
-Contoh TCP minimal:
-
-```env
-QC_SUITE_PLC_ENABLED=1
-QC_SUITE_PLC_DRY_RUN=0
-QC_SUITE_PLC_TRANSPORT=tcp
-QC_SUITE_PLC_HOST=192.168.1.50
-QC_SUITE_PLC_PORT=502
-QC_SUITE_PLC_MODBUS_UNIT_ID=1
-QC_SUITE_PLC_MODBUS_COMMAND_MODE=coil
-QC_SUITE_PLC_MODBUS_HOLD_ADDRESS=0
-QC_SUITE_PLC_MODBUS_RELEASE_ADDRESS=0
-QC_SUITE_PLC_MODBUS_ZERO_BASED_ADDRESSING=1
-```
-
-Contoh RTU untuk relay module serial (misalnya slave id 255, coil 0/1):
-
-```env
-QC_SUITE_PLC_ENABLED=1
-QC_SUITE_PLC_DRY_RUN=0
-QC_SUITE_PLC_TRANSPORT=rtu
-QC_SUITE_PLC_SERIAL_PORT=COM3
-QC_SUITE_PLC_SERIAL_BAUDRATE=9600
-QC_SUITE_PLC_SERIAL_PARITY=N
-QC_SUITE_PLC_SERIAL_BYTESIZE=8
-QC_SUITE_PLC_SERIAL_STOPBITS=1
-QC_SUITE_PLC_MODBUS_UNIT_ID=255
-QC_SUITE_PLC_MODBUS_COMMAND_MODE=coil
-QC_SUITE_PLC_MODBUS_HOLD_ADDRESS=0
-QC_SUITE_PLC_MODBUS_RELEASE_ADDRESS=1
-QC_SUITE_PLC_MODBUS_ZERO_BASED_ADDRESSING=1
-```
+- **Connection / Transport** — `enabled`, `dry_run`, transport `tcp` / `rtu` / `fx`, host/port
+  atau serial port + baudrate, unit id, timeout. Perubahan section ini **butuh restart backend**:
+  setelah Save, UI menawarkan restart otomatis (tombol **Restart Backend** juga ada di tab) —
+  aplikasi ditutup, kamera & port PLC dilepas, lalu dijalankan ulang dengan perintah yang sama.
+  Untuk backend remote (`run_client.py` ke server lain) restart harus dilakukan di server.
+- **I/O Addresses** — alamat relay (CH3 Clamp, CH2 OK Light+Buzzer, CH1 Enji Buzzer), input
+  (IN1 Release, IN2 Template Cycle, IN3 Clamp Feedback), accept pulse, guard reclamp,
+  debounce release. Berlaku langsung saat Save.
+- **Timer / Inspection Policy** dan **Inference / Model** — lihat tab.
 
 Catatan singkat:
 
-- `coil` cocok kalau output remote I/O berupa coil ON/OFF.
-- `holding_register` cocok kalau gateway Anda menulis nilai register tertentu.
-- `QC_SUITE_PLC_DRY_RUN=1` tetap aman untuk simulasi, karena hanya log command.
-- Jika perangkat Anda punya status balik, aktifkan `QC_SUITE_PLC_MODBUS_READBACK_ENABLED=1` dan isi alamat readback yang benar.
+- Output ditulis sebagai coil ON/OFF (FC05); input dibaca sebagai discrete input (FC02). Tidak ada mode holding-register.
+- `Dry Run` tetap aman untuk simulasi, karena hanya log command. PC baru default `enabled=false, dry_run=true`.
 - Reject tidak lagi ditulis ke repository hasil inspeksi utama; alasan reject disimpan ke `data/json_store/reject_log.jsonl` dan bisa dilihat lewat `GET /inspection/reject-logs` untuk admin.
 - Untuk counter accept-only di dashboard, kirim `decision_code=ACCEPT` ke `/dashboard/summary` dan `/dashboard/buckets`.
 
-Setelah itu, cek status PLC dari backend admin endpoint dan pastikan satu cycle hold/release terkirim saat inspeksi commit terjadi.
+Setelah itu, cek status PLC lewat `GET /inspection/plc/status` dan pastikan pulsa accept terkirim saat inspeksi commit terjadi.
 
 ## Mode Split Deployment
 
 Mode ini hanya diperlukan bila Anda ingin memisahkan backend dan client ke mesin berbeda.
 
 - backend berjalan di PC server
-- client Tkinter berjalan di PC operator/admin/engineer
+- client Tkinter berjalan di PC operator/admin
 - kamera tetap dibuka di sisi client
 - frame dikirim dari client ke backend lewat HTTP
 
@@ -198,10 +173,10 @@ QC_SUITE_PORT=8100
 QC_SUITE_DEBUG=0
 QC_SUITE_SECRET_KEY=ganti-secret-produksi
 QC_SUITE_DATA_ROOT=D:\qc-suite-data
-QC_SUITE_STICKER_INFERENCE_MODE=auto
-QC_SUITE_DEFAULT_STICKER_MODEL_PATH=D:\qc-suite-data\models\sticker.pt
-QC_SUITE_DEFAULT_STICKER_MODEL_META_PATH=D:\qc-suite-data\models\sticker.meta.json
 ```
+
+Model sticker dan mode inferensi diatur dari **Admin → Machine Settings → Inference**
+(atau per template lewat `vision.model_path`), bukan dari `.env`.
 
 Jika PostgreSQL dipakai:
 
@@ -285,12 +260,11 @@ Setelah backend dan client aktif:
 - Existing runtime in the repo is untouched.
 - This project uses JSON/file storage by default, with optional PostgreSQL or SQL Server persistence selected via `QC_SUITE_DATABASE_BACKEND`.
 - `local` is the default backend for desktop-only use, `postgresql` is the recommended relational backend for new deployments, and `sqlserver` is retained for compatibility.
-- Sticker inference Phase 3 is wired to `D:\ProjectMagang\akh.pt` with metadata from `D:\ProjectMagang\ds-43598c556c__yolov5mu__20260402-085412.meta.json`.
-- Runtime mode is controlled by `QC_SUITE_STICKER_INFERENCE_MODE`:
-  - `auto`: try Ultralytics first, fallback to classic contour inference
+- Inference mode is set in Machine Settings → Inference:
+  - `auto`: pick the backend from the model file extension (Ultralytics / ONNX / OpenVINO / TFLite), fallback to classic contour inference
   - `ultralytics`: require the YOLO runtime and fail if unavailable
   - `classic`: deterministic fallback for smoke tests and local debugging
-- The engineer screen now supports portable model export/import from the Model Registry.
-- Sticker tilt is a hard reject gate; when the configured threshold is exceeded, the operator sees `OUT_OF_ANGLE`.
+- **Import model** (Admin → Models → *Import Model Archive (.zip)*): zip berisi satu model — folder hasil export OpenVINO dari Ultralytics (`<nama>_openvino_model/` dengan `.xml` + `.bin` + `metadata.yaml`), `.pt`, `.onnx`, `.tflite`, atau hasil *Export* dari aplikasi ini. Model otomatis masuk ke `data/models/<nama>/` beserta `<nama>.meta.json` (class names diambil dari `metadata.yaml`); tanpa `metadata.yaml` import tetap jalan tapi label deteksi jadi angka. *Export* menyimpan zip yang bisa di-import lagi di PC lain.
+- The only validation mode is QC Sticker (presence / class / position). `WRONG_TYPE` is the only terminal reject; everything else keeps inferring until ACCEPT or `COMMIT_TIMEOUT`.
 - Dashboard summary and time buckets now aggregate persisted Phase 5 fields, including `station_id`, `sticker_backend`, `total_part_ready`, `avg_sticker_confidence`, and `avg_part_ready_match_ratio`.
 - `GET /deployments/active` returns `{ "deployment": ... }` so the client can distinguish between no deployment and a valid deployment deterministically.

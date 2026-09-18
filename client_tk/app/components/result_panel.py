@@ -4,7 +4,6 @@ import tkinter as tk
 
 import customtkinter as ctk
 
-from client_tk.app.mode_utils import normalize_mode, mode_label
 from client_tk.app.theme import BORDER, PANEL_ALT_BG, PANEL_BG, TEXT_PRIMARY, TEXT_SECONDARY, WARNING, WARNING_HOVER
 
 
@@ -42,9 +41,7 @@ class ResultPanel(ctk.CTkFrame):
         self.part_ready_status_var = self._build_field(self.part_ready_frame, 0, "Status")
         self.part_ready_ratio_var = self._build_field(self.part_ready_frame, 1, "Match Ratio (avg5)")
         self.part_ready_raw_ratio_var = self._build_field(self.part_ready_frame, 2, "Match Ratio (raw)")
-        self.part_ready_distance_var = self._build_field(self.part_ready_frame, 3, "Mean Distance")
-        self.part_ready_profile_var = self._build_field(self.part_ready_frame, 4, "Profile")
-        self.part_ready_threshold_var = self._build_field(self.part_ready_frame, 5, "Thresholds")
+        self.part_ready_threshold_var = self._build_field(self.part_ready_frame, 3, "Thresholds")
 
         self.sticker_frame = self._build_section("Sticker Validation")
         self.detected_class_var = self._build_field(self.sticker_frame, 0, "Detected Class")
@@ -53,18 +50,6 @@ class ResultPanel(ctk.CTkFrame):
         self.sticker_backend_var = self._build_field(self.sticker_frame, 3, "Backend")
         self.candidate_source_var = self._build_field(self.sticker_frame, 4, "Candidate Source")
         self.offset_var = self._build_field(self.sticker_frame, 5, "Offset")
-        self.anchor_offset_var = self._build_field(self.sticker_frame, 6, "Anchor Offset")
-        self.pose_angle_var = self._build_field(self.sticker_frame, 7, "Pose Angle")
-
-        self.component_frame = self._build_section("Component Count")
-        self.comp_mode_var = self._build_field(self.component_frame, 0, "Mode")
-        self.comp_roi_summary_var = self._build_field(self.component_frame, 1, "ROI Summary")
-        self.comp_reject_reason_var = self._build_field(self.component_frame, 2, "Reject Reason")
-
-        # Track section frames for show/hide
-        self._part_ready_section = self.part_ready_frame.master
-        self._sticker_section = self.sticker_frame.master
-        self._component_section = self.component_frame.master
 
         self.debug_frame = self._build_section("Inference Debug")
         self.raw_detection_count_var = self._build_field(self.debug_frame, 0, "Raw Detections")
@@ -75,8 +60,6 @@ class ResultPanel(ctk.CTkFrame):
         self.response_mode_var = self._build_field(self.debug_frame, 5, "Response Mode")
         self.latency_total_var = self._build_field(self.debug_frame, 6, "Latency Total")
         self.latency_inference_var = self._build_field(self.debug_frame, 7, "Inference Time")
-        # Anchor for restoring section order on show/hide
-        self._debug_section = self.debug_frame.master
 
         self.commit_frame = self._build_section("Commit Details")
         self.reason_var = self._build_field(self.commit_frame, 0, "Reason")
@@ -87,16 +70,6 @@ class ResultPanel(ctk.CTkFrame):
         self.event_var = self._build_field(self.commit_frame, 5, "Event ID")
         self.commit_var = self._build_field(self.commit_frame, 6, "Committed At")
         self.bind("<Configure>", self._on_resize, add="+")
-
-    def set_mode(self, validator_mode: str) -> None:
-        """Show/hide validation sections based on template validator mode."""
-        mode = normalize_mode(validator_mode)  # canonical: sticker|counter|defect
-        show_component = (mode == "counter")
-        target_show = self._component_section if show_component else self._sticker_section
-        target_hide = self._sticker_section if show_component else self._component_section
-        target_hide.pack_forget()
-        if not target_show.winfo_manager():
-            target_show.pack(fill="x", padx=12, pady=(0, 10), before=self._debug_section)
 
     def _build_section(self, title: str) -> ctk.CTkFrame:
         section = ctk.CTkFrame(self, fg_color=PANEL_ALT_BG, corner_radius=12, border_width=1, border_color=BORDER)
@@ -161,35 +134,6 @@ class ResultPanel(ctk.CTkFrame):
         self.live_decision_var.configure(text=str(live_validation.get("decision") or "-"))
         self.live_reason_var.configure(text=str(live_reason))
 
-        # Component count display
-        live_details = live_validation.get("validation_details") or {}
-        self._validator_mode = normalize_mode(str(live_details.get("mode") or "sticker"))
-        # Component count display
-        if self._validator_mode == "counter":
-            comp_details = display_details.get("component_rois") or []
-            self.comp_mode_var.configure(text="Component Count")
-            if comp_details:
-                roi_summaries = []
-                for roi in comp_details:
-                    roi_name = roi.get("name", "?")
-                    classes = roi.get("classes", {})
-                    all_ok = roi.get("ok", False)
-                    status = "OK" if all_ok else "FAIL"
-                    if isinstance(classes, dict):
-                        cls_info = ", ".join(f"{v.get('detected_voted', '?')}/{v.get('target', '?')} {cn}" for cn, v in classes.items())
-                    else:
-                        cls_info = ", ".join(f"{c.get('detected_voted', '?')}/{c.get('target', '?')} {c.get('class_name', '?')}" for c in classes)
-                    roi_summaries.append(f"{status} {roi_name}: {cls_info}")
-                self.comp_roi_summary_var.configure(text=" | ".join(roi_summaries))
-            else:
-                self.comp_roi_summary_var.configure(text="No ROIs")
-            comp_reject = display_validation.get("reject_reason_code") or "-"
-            self.comp_reject_reason_var.configure(text=str(comp_reject))
-        else:
-            self.comp_mode_var.configure(text="QC Sticker")
-            self.comp_roi_summary_var.configure(text="-")
-            self.comp_reject_reason_var.configure(text="-")
-
         self.live_template_version_var.configure(text=str(live_session.get("template_version_id") or "-"))
         # Inference gate display
         _gate = live_inference_gate
@@ -235,43 +179,20 @@ class ResultPanel(ctk.CTkFrame):
         )
         self.part_ready_ratio_var.configure(text=_format_metric(display_part_ready.get("match_ratio")))
         self.part_ready_raw_ratio_var.configure(text=_format_metric(display_part_ready.get("raw_match_ratio")))
-        self.part_ready_distance_var.configure(text=_format_metric(display_part_ready.get("mean_distance")))
-        profile_text = "-"
-        if display_part_ready.get("color_profile_id"):
-            profile_text = f"id={display_part_ready.get('color_profile_id')} | {display_part_ready.get('colorspace') or 'LAB'}"
-        elif display_part_ready.get("enabled") is False:
-            profile_text = "disabled"
-        self.part_ready_profile_var.configure(text=profile_text)
         threshold_text = "-"
-        if display_part_ready.get("enabled", True):
-            ratio_threshold = display_part_ready.get("min_match_ratio")
-            distance_threshold = display_part_ready.get("distance_threshold")
-            if ratio_threshold is not None or distance_threshold is not None:
-                threshold_text = (
-                    f"ratio>={_format_metric(ratio_threshold)} | "
-                    f"distance<={_format_metric(distance_threshold)}"
-                )
+        if display_part_ready.get("enabled") is False:
+            threshold_text = "disabled"
+        elif display_part_ready.get("min_match_ratio") is not None:
+            threshold_text = f"ratio>={_format_metric(display_part_ready.get('min_match_ratio'))}"
         self.part_ready_threshold_var.configure(text=threshold_text)
 
         confidence = display_validation.get("sticker_confidence")
         if confidence is None:
             confidence = display_candidate.get("confidence")
         offset = display_candidate.get("offset") or {}
-        anchor_offset = display_validation.get("anchor_offset") or {}
-        if not anchor_offset:
-            anchor_offset = (display_details.get("geometry") or {}).get("anchor_offset") or {}
         offset_text = "-"
         if offset:
             offset_text = f"x={_format_metric(offset.get('x'), precision=2)}, y={_format_metric(offset.get('y'), precision=2)}"
-        anchor_offset_text = "-"
-        if anchor_offset:
-            anchor_offset_text = (
-                f"x={_format_metric(anchor_offset.get('x'), precision=2)}, "
-                f"y={_format_metric(anchor_offset.get('y'), precision=2)}"
-            )
-        pose_angle = display_validation.get("pose_angle")
-        if pose_angle is None:
-            pose_angle = (display_details.get("geometry") or {}).get("pose_angle")
         backend = (
             display_validation.get("sticker_backend")
             or display_sticker_detection.get("backend")
@@ -283,8 +204,6 @@ class ResultPanel(ctk.CTkFrame):
         self.sticker_backend_var.configure(text=str(backend))
         self.candidate_source_var.configure(text=str(display_details.get("candidate_source") or "-"))
         self.offset_var.configure(text=offset_text)
-        self.anchor_offset_var.configure(text=anchor_offset_text)
-        self.pose_angle_var.configure(text="-" if pose_angle is None else f"{_format_metric(pose_angle, precision=2)} deg")
 
         raw_count = display_sticker_detection.get("raw_detection_count")
         raw_count_text = str(raw_count) if raw_count is not None else "-"
@@ -332,8 +251,6 @@ class ResultPanel(ctk.CTkFrame):
             self.part_ready_status_var,
             self.part_ready_ratio_var,
             self.part_ready_raw_ratio_var,
-            self.part_ready_distance_var,
-            self.part_ready_profile_var,
             self.part_ready_threshold_var,
             self.detected_class_var,
             self.expected_class_var,
@@ -341,8 +258,6 @@ class ResultPanel(ctk.CTkFrame):
             self.sticker_backend_var,
             self.candidate_source_var,
             self.offset_var,
-            self.anchor_offset_var,
-            self.pose_angle_var,
             self.raw_detection_count_var,
             self.fallback_reason_var,
             self.classes_filter_var,
@@ -358,8 +273,5 @@ class ResultPanel(ctk.CTkFrame):
             self.db_var,
             self.event_var,
             self.commit_var,
-            self.comp_mode_var,
-            self.comp_roi_summary_var,
-            self.comp_reject_reason_var,
         ):
             widget.configure(text="-")

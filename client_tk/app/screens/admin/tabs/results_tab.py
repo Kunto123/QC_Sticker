@@ -83,7 +83,6 @@ class ResultsTab:
                 ("id", "ID", 60, "center"),
                 ("time", "Time", 145, "w"),
                 ("decision", "Decision", 90, "center"),
-                ("mode", "Mode", 100, "center"),
                 ("part", "Part", 130, "w"),
                 ("push", "Push", 90, "center"),
                 ("reason", "Reason", 130, "w"),

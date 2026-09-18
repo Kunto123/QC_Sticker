@@ -18,15 +18,22 @@ python -m pytest backend/tests/test_evaluators.py -q -k Counter   # one class/pa
 ```
 
 The root `conftest.py` and `pyproject.toml [tool.pytest.ini_options]` make the
-suite runnable from the repo root: they fix `sys.path`, seed
-`QC_SUITE_DEFAULT_STICKER_MODEL_PATH` from an in-repo `.pt` so the model registry
-seeds non-empty, and register custom markers.
+suite runnable from the repo root: they fix `sys.path`, export
+`QC_SUITE_DEFAULT_STICKER_MODEL_PATH` from an in-repo `.pt` (consumed only by
+`test_api_smoke.py`, which copies it into the test machine's
+`machine_settings.json`), and register custom markers. Runtime settings for tests
+come from a `machine_settings.json` in the test data root, never from env vars.
 
 ### Expected state
 
-The suite is **fully green: 0 failed**. Ten `test_api_smoke` tests are skipped
-because they need the real trained sticker model (outside the repo); that is
-expected — see `HANDOFF.md` section 2b to un-skip them locally.
+As of 2026-09-18 (after Data/Training removal, HANDOFF.md §9):
+**170 passed, 2 failed, 7 skipped** (`pytest backend/tests`); client
+`test_async_bridge.py test_frame_upload.py test_app_restart.py`: 9 passed;
+`test_ui_smoke.py`: 12 passed / 8 failed (pre-existing drift, see `.claude/CLAUDE.md`).
+The two failures are pre-existing and documented in `.claude/CLAUDE.md`
+(`test_00b` needs a `.pt` for the registry seed; `test_04d` is test/code drift on
+`part_ready_ema_ratio`). The skips need the real trained sticker model (outside
+the repo); see `HANDOFF.md` section 2b to un-skip them locally.
 
 (History: five clusters of RED tests from a multi-round refactor were adjudicated by
 the orchestrator as intentional redesigns and resolved — PLC adapter/worker rewrite,
@@ -36,6 +43,14 @@ deployment global-binding, `/plc/status` operator access, OCR removal. See
 If you later change what the code *does*, do not silence a failing test by editing it
 to pass — either restore the behavior (test goes green) or delete/rewrite the obsolete
 test **and** update `HANDOFF.md`.
+
+### Retired: datasets / annotation / augment / training (by design, 2026-09-18)
+
+Training happens in other software. The dataset, annotation, augment and training
+repositories, workers, routes, Admin tabs and their tests are gone (HANDOFF.md §9).
+Do not re-add them. Model *import* is what remains and is covered by
+`backend/tests/test_model_export_import.py` (OpenVINO zip → `data/models/<name>/` +
+`.meta.json`, legacy export, round-trip, purge).
 
 ### Retired: OCR sticker validation (by design)
 
@@ -47,6 +62,7 @@ OCR-based sticker validation was **removed on purpose**. Sticker mode now valida
 text-normalization helpers that still exist) were preserved. Do NOT re-add tests that
 depend on the removed `StickerRule`/`VisionConfig` OCR fields (`use_ocr`,
 `ocr_expected_code`, `ocr_mode`, `ocr_engine`, `expected_dot_x/y`, `max_anchor_offset`).
+The last OCR helper code and its tests were deleted on 2026-09-18 (HANDOFF.md §7).
 
 ## The rule
 

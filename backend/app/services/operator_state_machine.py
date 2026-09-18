@@ -28,8 +28,6 @@ class OperatorInspectionStateMachine:
     - Part leave → reset to IDLE
     """
 
-    SETTLE_MIN_FRAMES = 0
-
     def update(
         self,
         session_state,

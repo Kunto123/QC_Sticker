@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from backend.app.core.config import DEFAULT_STICKER_MODEL_META_PATH, DEFAULT_STICKER_MODEL_PATH
 from backend.app.repositories.base_json import JsonRepository
 from shared.contracts.templates import InspectionTemplate, template_from_dict
 
@@ -19,7 +18,7 @@ _LIFECYCLE_TRANSITIONS: dict[str, set[str]] = {
 _ALL_LIFECYCLE_STATES = set(_LIFECYCLE_TRANSITIONS)
 
 
-def _sample_template() -> dict[str, Any]:
+def _sample_template(default_model_path: str = "", default_meta_path: str = "") -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
     return {
         "templates": [
@@ -70,8 +69,8 @@ def _sample_template() -> dict[str, Any]:
                                 "height": 240,
                             },
                             "vision": {
-                                "model_path": DEFAULT_STICKER_MODEL_PATH or "models/dummy.pt",
-                                "model_meta_path": DEFAULT_STICKER_MODEL_META_PATH or None,
+                                "model_path": default_model_path or "models/dummy.pt",
+                                "model_meta_path": default_meta_path or None,
                                 "runtime": "ultralytics",
                                 "conf_threshold": 0.25,
                                 "stream_fps": 10,
@@ -94,14 +93,10 @@ def _sample_template() -> dict[str, Any]:
                                 "expected_class": "K0W-HB0",
                                 "line": "LINE-A",
                                 "enabled": True,
-                                "validator_mode": "ml_detection",
                                 "min_roi_confidence": 0.0,
                                 "min_class_confidence": None,
                                 "max_offset_x": 80,
                                 "max_offset_y": 80,
-                                "tilt_gate_enabled": False,
-                                "expected_tilt_degrees": 0.0,
-                                "max_tilt_degrees": None,
                             },
                             "persistence": {"write_to_db": True},
                             "metadata": {},
@@ -114,8 +109,8 @@ def _sample_template() -> dict[str, Any]:
 
 
 class TemplatesRepository(JsonRepository):
-    def __init__(self) -> None:
-        super().__init__("templates.json", _sample_template())
+    def __init__(self, *, default_model_path: str = "", default_meta_path: str = "") -> None:
+        super().__init__("templates.json", _sample_template(default_model_path, default_meta_path))
 
     def _payload(self) -> dict[str, Any]:
         return self.load()
@@ -131,13 +126,6 @@ class TemplatesRepository(JsonRepository):
         items: list[dict[str, Any]] = []
         for template in self.list_templates():
             version = self.get_version(template["current_version_id"])
-            # Extract mode from version template data for display
-            _mode = "sticker"
-            _validator_mode = "ml_detection"
-            if version:
-                _vt = version.get("template") or {}
-                _mode = str(_vt.get("mode") or "sticker")
-                _validator_mode = str(_vt.get("sticker", {}).get("validator_mode") or "ml_detection")
             items.append(
                 {
                     "id": template["id"],
@@ -149,8 +137,6 @@ class TemplatesRepository(JsonRepository):
                     "updated_at": template.get("updated_at"),
                     "version_id": template.get("current_version_id"),
                     "version_number": version.get("version_number") if version else None,
-                    "mode": _mode,
-                    "sticker": {"validator_mode": _validator_mode},
                 }
             )
         return items
@@ -337,6 +323,8 @@ class TemplatesRepository(JsonRepository):
             self.save(store)
             return template_payload
         raise ValueError("Template not found.")
+
+    def list_versions(self, template_id: int) -> list[dict[str, Any]]:
         template = self.get_template(template_id)
         if not template:
             raise ValueError("Template not found.")

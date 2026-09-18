@@ -12,8 +12,7 @@ from backend.app.services.gap_detector import save_ref_patch, get_ref_path
 from backend.app.core.http import require_auth, require_roles
 from backend.app.services.template_config_manager import TemplateConfigManager
 from shared.contracts.enums import UserRole
-from shared.contracts.templates import normalize_mode, validate_criteria
-from backend.app.services.anomaly_backend import get_scorer, SimpleAnomalyScorer
+from shared.contracts.templates import validate_sticker_rule
 
 
 template_blueprint = Blueprint("templates", __name__, url_prefix="/templates")
@@ -56,13 +55,8 @@ def get_runtime_template(version_id: int):
 @require_roles(UserRole.ADMIN)
 def create_template():
     payload = request.get_json(force=True) or {}
-    # Normalize mode before validation
-    _mode = normalize_mode(payload.get("mode"))
-    if _mode and _mode not in ("sticker", "counter", "defect"):
-        return jsonify({"error": f"Unknown mode {_mode!r}. Must be one of: sticker, counter, defect"}), 400
-    _criteria = payload.get("criteria") or {}
-    if _mode and _criteria:
-        errors = validate_criteria(_mode, _criteria)
+    if isinstance(payload.get("sticker"), dict):
+        errors = validate_sticker_rule(payload["sticker"])
         if errors:
             return jsonify({"error": "; ".join(errors)}), 400
     try:
@@ -76,13 +70,8 @@ def create_template():
 @require_roles(UserRole.ADMIN)
 def update_template(template_id: int):
     payload = request.get_json(force=True) or {}
-    # Normalize mode and validate criteria (same as create)
-    _mode = normalize_mode(payload.get("mode"))
-    if _mode and _mode not in ("sticker", "counter", "defect"):
-        return jsonify({"error": f"Unknown mode {_mode!r}. Must be one of: sticker, counter, defect"}), 400
-    _criteria = payload.get("criteria") or {}
-    if _mode and _criteria:
-        errors = validate_criteria(_mode, _criteria)
+    if isinstance(payload.get("sticker"), dict):
+        errors = validate_sticker_rule(payload["sticker"])
         if errors:
             return jsonify({"error": "; ".join(errors)}), 400
     update_current = str(request.args.get("update_current") or "").lower() in ("1", "true", "yes")
@@ -160,12 +149,7 @@ def capture_part_ready_ref(template_id: int):
         return jsonify({"error": f"Decode failed: {exc}"}), 400
 
     save_path = str(get_ref_path(template_id))
-    _hsv_lower = np.array(roi.get("gap_hsv_lower", [90, 50, 50]))
-    _hsv_upper = np.array(roi.get("gap_hsv_upper", [130, 255, 255]))
-    _padding = int(roi.get("gap_padding_px", 20))
-    _rotation = float(roi.get("rotation", 0.0) or 0.0)
-
-    ok, err_msg = save_ref_patch(frame, roi, save_path, _hsv_lower, _hsv_upper, _padding, _rotation)
+    ok, err_msg = save_ref_patch(frame, roi, save_path)
     if ok:
         # Update template config with ref_path — use update_current_version with full detail
         try:
@@ -228,7 +212,6 @@ def upload_part_ready_ref(template_id: int):
         if detail:
             pr = dict(detail.get("part_ready") or {})
             pr["gap_ref_path"] = save_path
-            pr["gap_ref_type"] = "edge_map"
             pr["method"] = "gap_template_match"
             detail["part_ready"] = pr
             templates_repo.update_current_version(template_id, detail)
@@ -265,127 +248,3 @@ def rollback_template_version(template_id: int):
     return jsonify(result)
 
 
-@template_blueprint.post("/<int:template_id>/defect-calibrate")
-@require_roles(UserRole.ADMIN)
-def calibrate_defect_threshold(template_id: int):
-    """Calibrate defect thresholds for a defect-mode template.
-
-    Accepts a list of known-good frame crops (base64-encoded images).
-    Returns suggested thresholds per ROI.
-    """
-    payload = request.get_json(force=True) or {}
-    frames_b64: list[str] = payload.get("frames_b64") or []
-    if len(frames_b64) < 3:
-        return jsonify({"error": "Need at least 3 known-good frames for calibration"}), 400
-    frames = []
-    for fb64 in frames_b64:
-        try:
-            raw = base64.b64decode(fb64)
-            arr = np.frombuffer(raw, np.uint8)
-            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if img is not None:
-                frames.append(img)
-        except Exception:
-            continue
-    if len(frames) < 3:
-        return jsonify({"error": "Failed to decode enough frames"}), 400
-    detail = templates_repo.get_template_detail(template_id)
-    if not detail:
-        return jsonify({"error": "Template not found"}), 404
-    criteria = detail.get("criteria") or {}
-    rois = criteria.get("rois", [])
-    if not rois:
-        return jsonify({"error": "Template has no defect ROIs configured"}), 400
-    inference_mode = str(criteria.get("inference_mode", "whole_part")).strip().lower()
-    default_model = criteria.get("default_model_path")
-    fh, fw = frames[0].shape[:2]
-
-    if inference_mode == "whole_part" and not any(r.get("model_path") for r in rois):
-        # Whole-part calibration: single inference on union region, slice per ROI
-        from backend.app.services.evaluators.defect import _build_union_bbox, _parse_geometry, _aggregate_score
-        import logging
-        logger = logging.getLogger(__name__)
-
-        ux, uy, uw, uh = _build_union_bbox(rois, fw, fh)
-        if uw <= 0 or uh <= 0:
-            return jsonify({"error": "Union region is empty"}), 400
-
-        union_crops = [fr[uy:uy+uh, ux:ux+uw] for fr in frames]
-        union_crops = [c for c in union_crops if c.size > 0]
-        if len(union_crops) < 3:
-            return jsonify({"error": "Not enough valid union crops"}), 400
-
-        scorer = get_scorer(default_model)
-        # For each frame, score the union region once, then collect per-ROI slice scores
-        roi_scores: dict[str, list[float]] = {r.get("name", f"ROI {i}"): [] for i, r in enumerate(rois)}
-        for uc in union_crops:
-            try:
-                _, heatmap = scorer.score(uc)
-            except Exception as exc:
-                logger.warning("[calibrate] frame score failed: %s", exc)
-                continue
-            if heatmap is None or heatmap.size == 0:
-                continue
-            for i, roi in enumerate(rois):
-                name = roi.get("name", f"ROI {i}")
-                geom = roi.get("geometry", {})
-                rx, ry, rw, rh = _parse_geometry(geom, fw, fh)
-                # Map ROI coords to union coords
-                hs_y = max(0, ry - uy)
-                hs_x = max(0, rx - ux)
-                hs_h = min(rh, heatmap.shape[0] - hs_y) if heatmap is not None else 0
-                hs_w = min(rw, heatmap.shape[1] - hs_x) if heatmap is not None else 0
-                if hs_h <= 0 or hs_w <= 0:
-                    continue
-                slice_ = heatmap[hs_y:hs_y+hs_h, hs_x:hs_x+hs_w]
-                score = _aggregate_score(slice_, criteria.get("aggregation", "p99"))
-                roi_scores[name].append(score)
-
-        results = []
-        for i, roi in enumerate(rois):
-            name = roi.get("name", f"ROI {i}")
-            scores = roi_scores.get(name, [])
-            if len(scores) < 3:
-                results.append({"name": name, "error": f"Not enough valid scores ({len(scores)})"})
-                continue
-            import numpy as np
-            scores_arr = np.array(scores)
-            mean_score = float(scores_arr.mean())
-            std_score = float(scores_arr.std())
-            suggested_threshold = round(mean_score + 3.0 * std_score, 4)
-            results.append({
-                "name": name,
-                "threshold": round(suggested_threshold, 4),
-                "mean_score": round(mean_score, 4),
-                "std_score": round(std_score, 4),
-                "num_samples": len(scores),
-                "scores": [round(s, 4) for s in sorted(scores)],
-            })
-        logger.info(
-            "[calibrate] whole_part: %d ROIs calibrated from %d frames (union %dx%d)",
-            len(results), len(union_crops), uw, uh,
-        )
-        return jsonify({"results": results, "inference_mode": "whole_part"}), 200
-    else:
-        # Per-ROI crop calibration (legacy or override)
-        results = []
-        for roi in rois:
-            name = roi.get("name", "ROI")
-            geom = roi.get("geometry", {})
-            x = int(float(geom.get("x", 0.0)) * fw)
-            y = int(float(geom.get("y", 0.0)) * fh)
-            w = max(1, int(float(geom.get("w", 1.0)) * fw))
-            h = max(1, int(float(geom.get("h", 1.0)) * fh))
-            x = max(0, min(fw - 1, x))
-            y = max(0, min(fh - 1, y))
-            w = min(fw - x, w)
-            h = min(fh - y, h)
-            crops = [fr[y:y+h, x:x+w] for fr in frames]
-            crops = [c for c in crops if c.size > 0]
-            if len(crops) < 3:
-                results.append({"name": name, "error": "Not enough valid crops"})
-                continue
-            scorer = SimpleAnomalyScorer()
-            calib_result = scorer.calibrate(crops)
-            results.append({"name": name, **calib_result})
-        return jsonify({"results": results, "inference_mode": "per_roi_crop"}), 200

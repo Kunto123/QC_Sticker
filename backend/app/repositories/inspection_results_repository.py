@@ -29,7 +29,6 @@ def _new_aggregate() -> dict[str, Any]:
         "reject_not_found": 0,
         "reject_wrong_type": 0,
         "reject_out_of_position": 0,
-        "reject_out_of_angle": 0,
         "reject_low_conf": 0,
         "reject_other": 0,
         "_sum_part_ready_match_ratio": 0.0,

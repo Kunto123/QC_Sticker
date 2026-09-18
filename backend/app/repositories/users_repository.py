@@ -216,6 +216,8 @@ class UsersRepository(JsonRepository):
                 self.save(users)
                 return self._public_record(removed)
         raise ValueError("User not found.")
+
+    def set_role(self, user_id: int, role: str) -> dict[str, Any]:
         role_enum = UserRole(role)
         users = self.load()
         for item in users:

@@ -446,33 +446,36 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
         return future.result(timeout=max(self._timeout, 5.0))
 
 
-def build_plc_adapter(config) -> PlcAdapter:
-    """Factory: pilih adapter berdasarkan config."""
-    if config.plc_dry_run:
-        return DryRunPlcAdapter()
+def build_plc_adapter(conn) -> PlcAdapter:
+    """Factory: pick the adapter from MachineSettings.connection (PlcConnectionConfig).
 
-    if config.plc_transport == "fx":
-        return FXComputerLinkPlcAdapter(
-            port=config.plc_serial_port or "COM3",
-            baudrate=config.plc_serial_baudrate,
-            timeout=config.plc_timeout_ms / 1000.0,
-        )
-    if config.plc_transport == "rtu":
-        return ModbusRtuPlcAdapter(
-            port=config.plc_serial_port or "COM7",
-            baudrate=config.plc_serial_baudrate,
-            slave_id=config.plc_modbus_unit_id,
-            timeout=config.plc_timeout_ms / 1000.0,
-            parity=config.plc_serial_parity,
-            bytesize=config.plc_serial_bytesize,
-            stopbits=config.plc_serial_stopbits,
-        )
-    elif config.plc_transport == "tcp":
-        return ModbusTcpPlcAdapter(
-            host=config.plc_host or "127.0.0.1",
-            port=config.plc_port or 502,
-            slave_id=config.plc_modbus_unit_id,
-            timeout=config.plc_timeout_ms / 1000.0,
-        )
-    else:
+    dry_run → DryRun; transport "fx" / "rtu" / "tcp"; anything else degrades to DryRun.
+    """
+    if conn.dry_run:
         return DryRunPlcAdapter()
+    transport = str(conn.transport or "").strip().lower()
+    timeout_s = max(0.1, float(conn.timeout_ms) / 1000.0)
+    if transport == "fx":
+        return FXComputerLinkPlcAdapter(
+            port=conn.serial_port or "COM3",
+            baudrate=conn.serial_baudrate,
+            timeout=timeout_s,
+        )
+    if transport == "rtu":
+        return ModbusRtuPlcAdapter(
+            port=conn.serial_port or "COM7",
+            baudrate=conn.serial_baudrate,
+            slave_id=conn.modbus_unit_id,
+            timeout=timeout_s,
+            parity=conn.serial_parity,
+            bytesize=conn.serial_bytesize,
+            stopbits=conn.serial_stopbits,
+        )
+    if transport == "tcp":
+        return ModbusTcpPlcAdapter(
+            host=conn.host or "127.0.0.1",
+            port=conn.port or 502,
+            slave_id=conn.modbus_unit_id,
+            timeout=timeout_s,
+        )
+    return DryRunPlcAdapter()

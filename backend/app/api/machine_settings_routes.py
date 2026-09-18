@@ -1,26 +1,55 @@
-"""Machine Settings API — CRUD + seed + diagnostics.
+"""Machine Settings API — CRUD + PLC diagnostics.
 
-GET  /machine-settings          → current settings
-PUT  /machine-settings          → update settings (admin)
-POST /machine-settings/seed     → re-seed from env (admin, force=True)
+GET  /machine-settings                  → current settings (+ restart_required)
+PUT  /machine-settings                  → persist + live-apply (admin)
 GET  /machine-settings/plc/diagnostics  → live PLC status + input snapshot
-POST /machine-settings/plc/test-coil   → pulse a coil for wiring test (admin)
+POST /machine-settings/plc/test-coil    → pulse a coil for wiring test (admin)
+POST /machine-settings/plc/all-off      → emergency all coils off (admin)
+
+`machine_settings.json` is the only source for these values (nothing comes from
+`.env`). `io` and `timing` are applied live; `connection` and `inference` need a
+backend restart — the response says so via `restart_required`.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any
+from dataclasses import asdict
 
 from flask import Blueprint, g, jsonify, request
 
-from backend.app.core.container import inspection_session_service, machine_settings_repo, plc_worker
+from backend.app.core.container import (
+    app_config,
+    boot_connection,
+    inspection_session_service,
+    machine_settings_repo,
+    plc_worker,
+)
 from backend.app.core.http import require_roles
-from backend.app.models.machine_settings import MachineSettings
+from backend.app.models.machine_settings import InferenceConfig, MachineSettings
 from shared.contracts.enums import UserRole
 
 logger = logging.getLogger(__name__)
 
 machine_settings_blueprint = Blueprint("machine_settings", __name__, url_prefix="/machine-settings")
+
+# Inference section as it was applied at boot (for restart_required).
+_boot_inference = InferenceConfig(
+    mode=app_config.sticker_inference_mode,
+    device=app_config.device_mode,
+    cuda_device_id=app_config.cuda_device_id,
+    num_threads=app_config.inference_num_threads,
+    timeout_s=app_config.inference_timeout_s,
+    default_model_path=app_config.default_sticker_model_path,
+    default_model_meta_path=app_config.default_sticker_model_meta_path,
+)
+
+
+def _restart_required(settings: MachineSettings) -> bool:
+    return asdict(settings.connection) != asdict(boot_connection) or asdict(settings.inference) != asdict(_boot_inference)
+
+
+def _response(settings: MachineSettings) -> dict:
+    return {**settings.to_dict(), "restart_required": _restart_required(settings)}
 
 
 # ── CRUD ────────────────────────────────────────────────────────────
@@ -28,65 +57,32 @@ machine_settings_blueprint = Blueprint("machine_settings", __name__, url_prefix=
 @machine_settings_blueprint.get("")
 @require_roles(UserRole.ADMIN)
 def get_machine_settings():
-    """Return current machine settings."""
-    settings = machine_settings_repo.load_settings()
-    return jsonify(settings.to_dict())
+    return jsonify(_response(machine_settings_repo.load_settings()))
 
 
 @machine_settings_blueprint.put("")
 @require_roles(UserRole.ADMIN)
 def update_machine_settings():
-    """Update machine settings. Marks seeded_from_env=False (user-edited)."""
+    """Persist the full settings object and live-apply what can be applied."""
     payload = request.get_json(force=True) or {}
     try:
-        # Validate by attempting to parse
         new_settings = MachineSettings.from_dict(payload)
-        # Mark as user-edited so env seed won't overwrite
-        new_settings.seeded_from_env = False
         machine_settings_repo.save_settings(new_settings)
         logger.info("[machine-settings] updated by user %s", g.current_user.username)
     except (TypeError, ValueError, KeyError) as exc:
         return jsonify({"error": f"Invalid settings: {exc}"}), 400
 
-    # If PLC worker is running, update its strategy with new settings
     if plc_worker is not None:
         try:
-            plc_worker.set_validator_mode("sticker", new_settings)
-            logger.info("[machine-settings] PLC worker strategy refreshed")
-            # Also update PLC worker guards from new settings
-            plc_worker.configure_guards(
-                min_reclamp_interval_ms=new_settings.sticker.min_reclamp_interval_ms,
-                release_input_debounce_ms=new_settings.sticker.release_input_debounce_ms,
-            )
-        except Exception as exc:
-            logger.warning("[machine-settings] failed to refresh PLC worker strategy: %s", exc)
+            plc_worker.apply_machine_settings(new_settings)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[machine-settings] failed to apply I/O settings to PLC worker: %s", exc)
+    try:
+        inspection_session_service.apply_machine_settings(new_settings)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[machine-settings] failed to apply timing settings: %s", exc)
 
-    # Propagate timing settings to inspection session service (runtime update)
-    if inspection_session_service is not None:
-        try:
-            inspection_session_service.update_timing_settings(payload)
-            logger.info("[machine-settings] timing settings pushed to inspection session service")
-        except Exception as exc:
-            logger.warning("[machine-settings] failed to push timing settings: %s", exc)
-
-    return jsonify(new_settings.to_dict())
-
-
-# ── Seed ────────────────────────────────────────────────────────────
-
-@machine_settings_blueprint.post("/seed")
-@require_roles(UserRole.ADMIN)
-def seed_machine_settings():
-    """Re-seed machine settings from env vars. Force overwrite."""
-    from backend.app.core.container import app_config
-    force = str(request.args.get("force") or "").lower() in ("1", "true", "yes")
-    seeded = machine_settings_repo.seed_from_env(app_config, force=force)
-    settings = machine_settings_repo.load_settings()
-    return jsonify({
-        "seeded": seeded,
-        "settings": settings.to_dict(),
-        "note": "Seeded from env vars" if seeded else "DB already exists, skipped (use ?force=1 to overwrite)",
-    })
+    return jsonify(_response(new_settings))
 
 
 # ── PLC Diagnostics ─────────────────────────────────────────────────
@@ -105,7 +101,7 @@ def plc_diagnostics():
 def plc_test_coil():
     """Pulse a coil for wiring verification.
 
-    Body: { "address": 0, "duration_ms": 500, "channels": 4 }
+    Body: { "address": 0, "duration_ms": 500 }
     Safety: only works when dry_run=True or explicitly confirmed.
     """
     if plc_worker is None:

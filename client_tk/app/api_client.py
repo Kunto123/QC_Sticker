@@ -234,9 +234,6 @@ class ApiClient:
                 raise RuntimeError(f"{response.status_code}: {detail}")
             return response.json()
 
-    def update_roi(self, session_id: str, payload: dict) -> dict:
-        return self._post(f"/inspection/sessions/{session_id}/roi", payload)
-
     def update_rois(
         self,
         session_id: str,
@@ -358,150 +355,6 @@ class ApiClient:
     def clear_user_rfid(self, user_id: int) -> dict:
         return self._delete(f"/auth/users/{user_id}/rfid")
 
-    def list_profiles(self) -> list[dict]:
-        return self._get("/calibration/profiles")
-
-    def compute_color_profile(self, payload: dict) -> dict:
-        return self._post("/calibration/color-profile", payload)
-
-    def save_profile(self, payload: dict) -> dict:
-        return self._post("/calibration/profiles", payload)
-
-    def update_profile(self, profile_id: int, payload: dict) -> dict:
-        return self._put(f"/calibration/profiles/{profile_id}", payload)
-
-    def delete_profile(self, profile_id: int) -> dict:
-        return self._delete(f"/calibration/profiles/{profile_id}")
-
-    def compute_mean_std_threshold(self, empty_b64: str, part_b64: str, sticker_b64: str) -> dict:
-        """Send 3 calibration images to compute MEAN_MAX and STD_MAX thresholds."""
-        return self._post("/calibration/mean-std-threshold", {
-            "empty": empty_b64,
-            "part": part_b64,
-            "sticker": sticker_b64,
-        })
-
-    def list_datasets(self) -> list[dict]:
-        return self._get("/datasets")
-
-    def create_dataset(self, payload: dict) -> dict:
-        return self._post("/datasets", payload)
-
-    def update_dataset(self, dataset_id: str, payload: dict) -> dict:
-        return self._patch(f"/datasets/{dataset_id}", payload)
-
-    def delete_dataset(self, dataset_id: str) -> dict:
-        return self._delete(f"/datasets/{dataset_id}")
-
-    def list_dataset_files(self, dataset_id: str, target: str = "images") -> list[dict]:
-        return self._get(f"/datasets/{dataset_id}/files", {"target": target})
-
-    def list_dataset_versions(self, dataset_id: str) -> list[dict]:
-        return self._get(f"/datasets/{dataset_id}/versions")
-
-    def create_dataset_version(self, dataset_id: str, payload: dict) -> dict:
-        return self._post(f"/datasets/{dataset_id}/versions", payload)
-
-    def get_dataset_version(self, dataset_id: str, version_id: str) -> dict:
-        return self._get(f"/datasets/{dataset_id}/versions/{version_id}")
-
-    def update_dataset_version(self, dataset_id: str, version_id: str, payload: dict) -> dict:
-        return self._put(f"/datasets/{dataset_id}/versions/{version_id}", payload)
-
-    def export_dataset_version(self, dataset_id: str, version_id: str) -> dict:
-        return self._post(f"/datasets/{dataset_id}/versions/{version_id}/export", {})
-
-    def upload_dataset_file(self, dataset_id: str, payload: dict) -> dict:
-        return self._post(f"/datasets/{dataset_id}/upload", payload)
-
-    def upload_dataset_files(self, dataset_id: str, file_paths: list[str], target: str = "images") -> dict:
-        if self._local_mode:
-            from backend.app.core.container import datasets_repo
-
-            if not file_paths:
-                raise RuntimeError("400: At least one file is required")
-            batch = [(Path(file_path).name, Path(file_path).read_bytes()) for file_path in file_paths]
-            saved = datasets_repo.save_files(dataset_id, target, batch)
-            return {"target": target, "count": len(saved), "items": saved}
-
-        multipart_files = []
-        handles = []
-        response = None
-        try:
-            for file_path in file_paths:
-                path = Path(file_path)
-                handle = path.open("rb")
-                handles.append(handle)
-                content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-                multipart_files.append(("files", (path.name, handle, content_type)))
-
-            response = self.session.request(
-                method="POST",
-                url=f"{self.base_url}/datasets/{dataset_id}/upload",
-                data={"target": target},
-                files=multipart_files,
-                headers=self._headers(json_content_type=False),
-                timeout=60,
-            )
-        finally:
-            for handle in handles:
-                try:
-                    handle.close()
-                except Exception:
-                    pass
-
-        if response is None:
-            raise RuntimeError("Upload request did not start")
-        if not response.ok:
-            detail = response.text
-            try:
-                detail = response.json().get("error") or detail
-            except ValueError:
-                pass
-            raise RuntimeError(f"{response.status_code}: {detail}")
-        return response.json()
-
-    def get_annotation(self, dataset_id: str, image_name: str) -> dict:
-        return self._get(f"/datasets/{dataset_id}/annotations/{image_name}")
-
-    def save_annotation(self, dataset_id: str, image_name: str, labels: list[dict]) -> dict:
-        return self._post(f"/datasets/{dataset_id}/annotations/{image_name}", {"labels": labels})
-
-    def download_dataset_file(self, dataset_id: str, target: str, file_name: str) -> bytes:
-        safe_name = quote(str(Path(file_name).name), safe="")
-        return self._request_bytes("GET", f"/datasets/{dataset_id}/files/{target}/{safe_name}", timeout=20)
-
-    def download_dataset_image(self, dataset_id: str, image_name: str) -> bytes:
-        return self.download_dataset_file(dataset_id, "images", image_name)
-
-    def get_augment_capabilities(self) -> dict:
-        return self._get("/augment/capabilities")
-
-    def list_augment_jobs(self) -> list[dict]:
-        return self._get("/augment/jobs")
-
-    def create_augment_job(self, payload: dict) -> dict:
-        return self._post("/augment/jobs", payload)
-
-    def delete_augment_job(self, job_id: str) -> dict:
-        return self._delete(f"/augment/jobs/{job_id}")
-
-    def list_training_jobs(self) -> list[dict]:
-        return self._get("/train/jobs")
-
-    def list_base_models(self, family: str | None = None) -> list[dict]:
-        params = {"family": family} if family else None
-        return self._get("/train/base-models", params)
-
-    def create_training_job(self, payload: dict) -> dict:
-        return self._post("/train/jobs", payload)
-
-    def cancel_training_job(self, job_id: str) -> dict:
-        return self._post(f"/train/jobs/{job_id}/cancel", {})
-
-    def delete_training_job(self, job_id: str) -> dict:
-        return self._delete(f"/train/jobs/{job_id}")
-
     def list_models(self) -> list[dict]:
         return self._get("/models")
 
@@ -511,15 +364,27 @@ class ApiClient:
     def export_model_archive(self, model_id: int) -> bytes:
         return self._request_bytes("POST", f"/models/{model_id}/export", timeout=60)
 
-    def import_model_archive(self, archive_path: str, *, target_lifecycle: str = "draft", skip_validation: bool = False, force_rename: bool = False) -> dict:
+    def import_model_archive(
+        self,
+        archive_path: str,
+        *,
+        name: str | None = None,
+        target_lifecycle: str = "draft",
+        skip_validation: bool = False,
+        force_rename: bool = False,
+    ) -> dict:
+        """Import a model package (.zip). Files land in data/models/<name>/ on the backend."""
         archive_bytes = Path(archive_path).read_bytes()
         payload = {
             "content_b64": base64.b64encode(archive_bytes).decode("ascii"),
+            "file_name": Path(archive_path).name,
             "target_lifecycle": target_lifecycle,
             "skip_validation": "1" if skip_validation else "0",
             "force_rename": "1" if force_rename else "0",
         }
-        return self._post("/models/import", payload)
+        if name:
+            payload["name"] = name
+        return self._request_json("POST", "/models/import", payload=payload, timeout=120)
 
     def create_model(self, payload: dict) -> dict:
         return self._post("/models", payload)
@@ -604,15 +469,6 @@ class ApiClient:
 
     def update_machine_settings(self, payload: dict) -> dict:
         return self._put("/machine-settings", payload)
-
-    def seed_machine_settings(self, force: bool = True) -> dict:
-        # Pass force as a query param (not embedded in the path) — embedding "?force=1"
-        # in the path while the transport also sets query_string raises
-        # "Query string is defined in the path and as an argument".
-        return self._request_json(
-            "POST", "/machine-settings/seed",
-            params={"force": "1" if force else "0"}, payload={},
-        )
 
     def get_plc_diagnostics(self) -> dict:
         return self._get("/machine-settings/plc/diagnostics")

@@ -7,10 +7,9 @@ Flow:
   Any state → Input release → IDLE (all off)
   Any state → Input template → cycle template
 
-Strategy pattern:
-  PlcWorker delegates mode-specific behavior to PlcFlowStrategy.
-  Strategy is selected by `validator_mode` from the active template.
-  Strategy reads addresses/timing from MachineSettings (DB, not env).
+Coil writes go through StickerFlow (services/sticker_flow.py); the input poll
+loop, status() and clamp_engaged() read this worker's mirror fields. Both are
+(re)configured from MachineSettings.io by apply_machine_settings().
 """
 from __future__ import annotations
 
@@ -19,8 +18,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from backend.app.services.counter_flow import CounterFlow
-from backend.app.services.plc_flow_strategy import PlcFlowStrategy
+from backend.app.models.machine_settings import PlcIoConfig
 from backend.app.services.sticker_flow import StickerFlow
 
 if TYPE_CHECKING:
@@ -33,54 +31,28 @@ _INPUT_READ_COUNT = 8
 _CMD_QUEUE_MAX = 64
 
 
-def _build_strategy(
-    validator_mode: str,
-    adapter: "PlcAdapter",
-    settings,  # MachineSettings
-    num_channels: int = 4,
-    dry_run: bool = False,
-) -> PlcFlowStrategy:
-    """Factory: select strategy based on validator_mode."""
-    mode = (validator_mode or "sticker").strip().lower()
-    if mode == "component_count":
-        return CounterFlow(adapter, settings.counter, num_channels)
-    if mode == "defect":
-        from backend.app.services.defect_flow import DefectFlow
-        return DefectFlow(adapter, settings.sticker, num_channels)
-    # Default: sticker mode
-    return StickerFlow(adapter, settings.sticker, num_channels)
-
-
 class PlcWorker:
     def __init__(
         self,
         adapter: "PlcAdapter",
-        accept_pulse_ms: int = 1000,
+        *,
         num_channels: int = 4,
-        input_release_address: int = 0,
-        input_template_address: int = 1,
-        input_clamp_engaged_address: int = 2,
-        clamp_feedback_enabled: bool = False,
-        relay_clamp_address: int = 3,
-        relay_ok_light_buzzer_address: int = 2,
-        relay_enji_buzzer_address: int = 1,
+        dry_run: bool = True,
     ) -> None:
         self._adapter = adapter
         self._num_channels = num_channels
-        self._accept_pulse_ms = int(accept_pulse_ms)
 
-        # Legacy constructor args (kept for backward compat / container.py wiring)
-        # These are OVERRIDDEN once strategy is set from MachineSettings.
-        self._input_release_address = max(0, int(input_release_address))
-        self._input_template_address = max(0, int(input_template_address))
-        self._input_clamp_engaged_address = max(0, int(input_clamp_engaged_address))
-        self._clamp_feedback_enabled = bool(clamp_feedback_enabled)
-        self._relay_clamp = max(0, int(relay_clamp_address))
-        self._relay_ok_light_buzzer = max(0, int(relay_ok_light_buzzer_address))
-        self._relay_enji_buzzer = max(0, int(relay_enji_buzzer_address))
-
-        # Strategy (set via set_strategy or set_validator_mode)
-        self._strategy: PlcFlowStrategy | None = None
+        # I/O map + PLC timing. Defaults match PlcIoConfig; apply_machine_settings()
+        # overwrites them and builds the flow strategy.
+        self._accept_pulse_ms = 1000
+        self._input_release_address = 0
+        self._input_template_address = 1
+        self._input_clamp_engaged_address = 2
+        self._clamp_feedback_enabled = False
+        self._relay_clamp = 3
+        self._relay_ok_light_buzzer = 2
+        self._relay_enji_buzzer = 1
+        self._strategy: StickerFlow = StickerFlow(adapter, PlcIoConfig(), num_channels)
 
         # ── Cycle Lock State ──
         self._cycle_locked: bool = False
@@ -88,10 +60,10 @@ class PlcWorker:
         self._last_clamp_off_at: float = 0.0
         self._last_part_ready_event_id: str | None = None
 
-        # Config (set from container)
+        # Guards (from MachineSettings.io) / dry-run (from MachineSettings.connection)
         self._min_reclamp_interval_ms: int = 3000
         self._release_input_debounce_ms: int = 500
-        self._dry_run: bool = False
+        self._dry_run: bool = bool(dry_run)
 
         # Release input edge tracking
         self._release_input_started_at: float | None = None
@@ -99,7 +71,6 @@ class PlcWorker:
 
         # State
         self._state: str = "IDLE"
-        self._accept_pulse_end: float | None = None
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -132,58 +103,6 @@ class PlcWorker:
         self._on_state_change_callback = None
         self._on_actuation_result_callback = None  # Item 1: actuation ACK/NACK
 
-    # ── Strategy setup ───────────────────────────────────────────────
-
-    def set_strategy(self, strategy: PlcFlowStrategy) -> None:
-        """Set the active flow strategy. Called from container after seed."""
-        self._strategy = strategy
-        logger.info("[plc-worker] strategy set: %s", strategy.flow_name)
-
-    def set_validator_mode(self, mode: str, settings=None) -> None:
-        """Select strategy by validator_mode string.
-
-        If settings (MachineSettings) is provided, build strategy from DB.
-        Otherwise, fall back to legacy constructor args (backward compat).
-        """
-        if settings is not None:
-            self._strategy = _build_strategy(
-                mode, self._adapter, settings, self._num_channels, self._dry_run
-            )
-            logger.info(
-                "[plc-worker] strategy built from MachineSettings: %s",
-                self._strategy.flow_name,
-            )
-        else:
-            # Legacy fallback — build from constructor args
-            from backend.app.models.machine_settings import StickerModeConfig, CounterModeConfig
-            if mode == "component_count":
-                cfg = CounterModeConfig(
-                    relay_clamp_address=self._relay_clamp,
-                    relay_ok_light_buzzer_address=self._relay_ok_light_buzzer,
-                    relay_enji_buzzer_address=self._relay_enji_buzzer,
-                    input_release_address=self._input_release_address,
-                    input_template_address=self._input_template_address,
-                    input_clamp_engaged_address=self._input_clamp_engaged_address,
-                    clamp_feedback_enabled=self._clamp_feedback_enabled,
-                )
-                self._strategy = CounterFlow(self._adapter, cfg, self._num_channels)
-            else:
-                cfg = StickerModeConfig(
-                    relay_clamp_address=self._relay_clamp,
-                    relay_ok_light_buzzer_address=self._relay_ok_light_buzzer,
-                    relay_enji_buzzer_address=self._relay_enji_buzzer,
-                    input_release_address=self._input_release_address,
-                    input_template_address=self._input_template_address,
-                    input_clamp_engaged_address=self._input_clamp_engaged_address,
-                    clamp_feedback_enabled=self._clamp_feedback_enabled,
-                    accept_pulse_ms=self._accept_pulse_ms,
-                )
-                if mode == "defect":
-                    from backend.app.services.defect_flow import DefectFlow
-                    self._strategy = DefectFlow(self._adapter, cfg, self._num_channels)
-                else:
-                    self._strategy = StickerFlow(self._adapter, cfg, self._num_channels)
-
     # ── Public API (unchanged signatures) ───────────────────────────
 
     def start(self) -> None:
@@ -202,7 +121,7 @@ class PlcWorker:
         self._state = "IDLE"
         self._thread = threading.Thread(target=self._loop, name="qc-plc-worker", daemon=True)
         self._thread.start()
-        logger.info("[plc-worker] started (state=%s, strategy=%s)", self._state, self._strategy.flow_name if self._strategy else "none")
+        logger.info("[plc-worker] started (state=%s)", self._state)
 
     def stop(self, timeout: float = 3.0) -> None:
         self._stop_event.set()
@@ -229,9 +148,6 @@ class PlcWorker:
     def force_release(self, *, reason: str = "manual") -> None:
         self._enqueue_cmd({"type": "force_release", "reason": reason})
 
-    def set_template_cycle_callback(self, callback) -> None:
-        self._template_cycle_callback = callback
-
     def set_on_state_change_callback(self, callback) -> None:
         self._on_state_change_callback = callback
 
@@ -243,16 +159,32 @@ class PlcWorker:
         """
         self._on_actuation_result_callback = callback
 
-    def configure_guards(
-        self,
-        *,
-        min_reclamp_interval_ms: int = 3000,
-        release_input_debounce_ms: int = 500,
-        dry_run: bool = False,
-    ) -> None:
-        self._min_reclamp_interval_ms = max(0, int(min_reclamp_interval_ms))
-        self._release_input_debounce_ms = max(0, int(release_input_debounce_ms))
-        self._dry_run = bool(dry_run)
+    def apply_machine_settings(self, settings) -> None:
+        """Apply MachineSettings.io: rebuild the flow strategy AND sync the mirror
+        fields read by the poll loop / status(). Safe to call while running.
+        `dry_run` is deliberately NOT touched here — it comes from
+        MachineSettings.connection at boot and needs a restart to change.
+        """
+        io = settings.io
+        self._accept_pulse_ms = max(100, int(io.accept_pulse_ms))
+        self._input_release_address = max(0, int(io.input_release_address))
+        self._input_template_address = max(0, int(io.input_template_address))
+        self._input_clamp_engaged_address = max(0, int(io.input_clamp_engaged_address))
+        self._clamp_feedback_enabled = bool(io.clamp_feedback_enabled)
+        self._relay_clamp = max(0, int(io.relay_clamp_address))
+        self._relay_ok_light_buzzer = max(0, int(io.relay_ok_light_buzzer_address))
+        self._relay_enji_buzzer = max(0, int(io.relay_enji_buzzer_address))
+        self._min_reclamp_interval_ms = max(0, int(io.min_reclamp_interval_ms))
+        self._release_input_debounce_ms = max(0, int(io.release_input_debounce_ms))
+        self._strategy = StickerFlow(self._adapter, io, self._num_channels)
+        logger.info(
+            "[plc-worker] settings applied: relay clamp=%d ok=%d enji=%d | input release=%d template=%d "
+            "clamp_engaged=%d feedback=%s | pulse=%dms reclamp_guard=%dms release_debounce=%dms",
+            self._relay_clamp, self._relay_ok_light_buzzer, self._relay_enji_buzzer,
+            self._input_release_address, self._input_template_address,
+            self._input_clamp_engaged_address, self._clamp_feedback_enabled,
+            self._accept_pulse_ms, self._min_reclamp_interval_ms, self._release_input_debounce_ms,
+        )
 
     def unlock_cycle(self, *, reason: str = "manual") -> None:
         logger.info("[plc-worker] cycle unlocked — %s", reason)
@@ -267,7 +199,7 @@ class PlcWorker:
                 "running": self._thread is not None and self._thread.is_alive(),
                 "state": self._state,
                 "connected": self._adapter.is_connected(),
-                "strategy": self._strategy.flow_name if self._strategy else "none",
+                "strategy": self._strategy.flow_name,
                 "clamp_feedback_enabled": self._clamp_feedback_enabled,
                 "clamp_feedback_address": self._input_clamp_engaged_address,
                 "clamp_engaged": clamp_engaged,
@@ -315,18 +247,6 @@ class PlcWorker:
         return self._state in {"CLAMPING", "CLAMPED", "REJECT_BUZZER"}
 
     # ── Backward-compatible coil access for diagnostics ──────────────
-
-    @property
-    def relay_clamp(self) -> int:
-        return self._relay_clamp
-
-    @property
-    def relay_ok_light_buzzer(self) -> int:
-        return self._relay_ok_light_buzzer
-
-    @property
-    def relay_enji_buzzer(self) -> int:
-        return self._relay_enji_buzzer
 
     @property
     def num_channels(self) -> int:
@@ -391,16 +311,8 @@ class PlcWorker:
         _event_id = self._current_decision_event_id
         _decision = "ACCEPT"
         try:
-            if self._strategy is not None:
-                self._strategy.on_accept(self)
-                self._set_state("ACCEPT_PULSE")
-            else:
-                # Legacy hardcoded fallback
-                self._set_state("ACCEPT_PULSE")
-                self._write_coil(self._relay_clamp, False)
-                self._write_coil(self._relay_ok_light_buzzer, True)
-                self._accept_pulse_end = time.time() + (self._accept_pulse_ms / 1000.0)
-                logger.info("[plc-worker] ACCEPT — CH1 pulse %dms (legacy)", self._accept_pulse_ms)
+            self._strategy.on_accept(self)
+            self._set_state("ACCEPT_PULSE")
             # Item 1: actuation ACK
             self._fire_actuation_result(_event_id, _decision, True)
         except Exception as exc:
@@ -412,14 +324,8 @@ class PlcWorker:
         _event_id = self._current_decision_event_id
         _decision = "REJECT"
         try:
-            if self._strategy is not None:
-                self._strategy.on_reject(self)
-                self._set_state("REJECT_BUZZER")
-            else:
-                self._set_state("REJECT_BUZZER")
-                self._write_coil(self._relay_enji_buzzer, True)
-                self._write_coil(self._relay_clamp, True)
-                logger.info("[plc-worker] REJECT — CH2 ON, waiting Input 1 (legacy)")
+            self._strategy.on_reject(self)
+            self._set_state("REJECT_BUZZER")
             # Item 1: actuation ACK
             self._fire_actuation_result(_event_id, _decision, True)
         except Exception as exc:
@@ -428,11 +334,7 @@ class PlcWorker:
             self._fire_actuation_result(_event_id, _decision, False, str(exc))
 
     def _finish_accept_pulse(self) -> None:
-        if self._strategy is not None and isinstance(self._strategy, StickerFlow):
-            self._strategy.finish_accept_pulse(self)
-        else:
-            self._write_coil(self._relay_ok_light_buzzer, False)
-            self._accept_pulse_end = None
+        self._strategy.finish_accept_pulse(self)
         self._last_clamp_off_at = time.time()
         self._set_state("IDLE")
         logger.info("[plc-worker] ACCEPT done → IDLE")
@@ -477,15 +379,8 @@ class PlcWorker:
                 return
         self._last_part_ready_event_id = event_id
 
-        if self._strategy is not None:
-            self._strategy.on_part_ready(self)
-            self._set_state("CLAMPING")
-        else:
-            # Legacy fallback
-            self._write_coil(self._relay_clamp, True)
-            self._write_coil(self._relay_ok_light_buzzer, False)
-            self._write_coil(self._relay_enji_buzzer, False)
-            self._set_state("CLAMPING")
+        self._strategy.on_part_ready(self)
+        self._set_state("CLAMPING")
         logger.info("[plc-worker] CLAMPING — event=%s", event_id)
 
     def _cmd_decision(self, cmd: dict) -> None:
@@ -546,13 +441,9 @@ class PlcWorker:
                     self._handle_cmd(cmd)
 
                 # Check accept pulse timeout
-                if self._accept_pulse_end is not None and time.time() >= self._accept_pulse_end:
+                # Strategy-level accept pulse
+                if self._strategy.is_accept_pulse_complete() and self._state == "ACCEPT_PULSE":
                     self._finish_accept_pulse()
-
-                # Also check strategy-level accept pulse (StickerFlow)
-                if self._strategy is not None and isinstance(self._strategy, StickerFlow):
-                    if self._strategy.is_accept_pulse_complete() and self._state == "ACCEPT_PULSE":
-                        self._finish_accept_pulse()
 
                 # Poll inputs
                 self._poll_inputs()

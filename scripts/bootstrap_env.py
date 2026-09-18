@@ -24,47 +24,25 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 ENV_TEMPLATE = """\
+# Secrets + bootstrap only. Everything else (PLC, timing, inference/model)
+# lives in data/json_store/machine_settings.json and is edited from
+# Admin -> Machine Settings.
+QC_SUITE_ENV=dev
+QC_SUITE_SECRET_KEY=CHANGE_ME_IN_PRODUCTION
+QC_SUITE_DATA_ROOT=./data
+
+# Deployment topology
 QC_SUITE_LOCAL_ONLY=1
+QC_SUITE_SERVER_URL=local://embedded
 QC_SUITE_HOST=127.0.0.1
 QC_SUITE_PORT=8100
 QC_SUITE_DEBUG=0
-QC_SUITE_SECRET_KEY=CHANGE_ME_IN_PRODUCTION
-QC_SUITE_ACCESS_TOKEN_TTL_SECONDS=86400
-QC_SUITE_DATA_ROOT=./data
-QC_SUITE_SERVER_URL=local://embedded
+
+# Client
 QC_SUITE_UPLOAD_INTERVAL_MS=500
 
-QC_SUITE_STICKER_INFERENCE_MODE=ultralytics
-QC_SUITE_DEFAULT_STICKER_MODEL_PATH=
-QC_SUITE_DEFAULT_STICKER_MODEL_META_PATH=
-QC_SUITE_DEVICE=auto
-QC_SUITE_CUDA_DEVICE_ID=0
-
-QC_SUITE_TRAINING_ENGINE_MODE=real
-QC_SUITE_TRAINING_TIMEOUT_MINUTES=720
-QC_SUITE_TRAINING_DEFAULT_EPOCHS=200
-QC_SUITE_TRAINING_DEFAULT_IMGSZ=640
-QC_SUITE_TRAINING_DEFAULT_BATCH=16
-QC_SUITE_TRAINING_DEFAULT_PATIENCE=20
-QC_SUITE_TRAINING_WEIGHTS_DOWNLOAD_ALLOWED=1
-QC_SUITE_GPU_FAIL_FAST=1
-QC_SUITE_PUSH_WORKER_INTERVAL_SECONDS=30
-QC_SUITE_PUSH_WORKER_MAX_RETRY=5
-
-QC_SUITE_PART_READY_SETTLE_MS=1500
-QC_SUITE_GEOMETRIC_AUGMENT_ENABLED=0
-
-# Legacy remote-streaming knobs retained for compatibility with split deployments.
-# Local-only desktop mode ignores these values.
-QC_SUITE_STREAM_PORT=8101
-QC_SUITE_STREAM_HOST=
-QC_SUITE_STREAM_URL=
-
-QC_SUITE_ACCESS_LOGS_ENABLED=0
-QC_SUITE_WERKZEUG_REQUEST_LOGS_ENABLED=0
-
+# Relational mirror: local | postgresql | sqlserver
 QC_SUITE_DATABASE_BACKEND=local
-QC_SUITE_SQL_ENABLED=0
 
 POSTGRESQL_HOST=
 POSTGRESQL_PORT=5432
@@ -113,7 +91,6 @@ def main(check: bool = False) -> int:
     required_dirs = [
         data_root,
         data_root / "json_store",
-        data_root / "datasets",
         data_root / "models",
         data_root / "backups",
     ]

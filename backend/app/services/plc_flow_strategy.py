@@ -31,7 +31,7 @@ class PlcFlowStrategy(ABC):
     def __init__(
         self,
         adapter: PlcAdapter,
-        settings,  # StickerModeConfig or CounterModeConfig
+        settings,  # PlcIoConfig
         num_channels: int = 4,
     ):
         self._adapter = adapter

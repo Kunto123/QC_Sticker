@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from backend.app.core.config import DEFAULT_STICKER_MODEL_META_PATH, DEFAULT_STICKER_MODEL_PATH, MODELS_DIR, PROJECT_ROOT
+from backend.app.core.config import MODELS_DIR, PROJECT_ROOT
 from backend.app.repositories.base_json import JsonRepository
 
 # Lifecycle: draft → validated → canary → production → retired
@@ -52,8 +52,10 @@ def _path_candidates(raw_path: str) -> set[str]:
     return candidates
 
 
-def _load_default_meta() -> dict[str, Any]:
-    path = Path(DEFAULT_STICKER_MODEL_META_PATH)
+def _load_default_meta(meta_path: str) -> dict[str, Any]:
+    if not meta_path:
+        return {}
+    path = Path(meta_path)
     if not path.exists():
         return {}
     try:
@@ -62,18 +64,19 @@ def _load_default_meta() -> dict[str, Any]:
         return {}
 
 
-def _default_models_payload() -> dict[str, Any]:
-    meta = _load_default_meta()
-    now = datetime.now(UTC).isoformat()
-    if not DEFAULT_STICKER_MODEL_PATH:
+def _default_models_payload(default_model_path: str = "", default_meta_path: str = "") -> dict[str, Any]:
+    """Registry seed used only when models.json does not exist yet."""
+    if not default_model_path:
         return {"models": []}
+    meta = _load_default_meta(default_meta_path)
+    now = datetime.now(UTC).isoformat()
     return {
         "models": [
             {
                 "id": 1,
                 "name": "AKH Sticker Detector",
-                "path": DEFAULT_STICKER_MODEL_PATH,
-                "meta_path": DEFAULT_STICKER_MODEL_META_PATH or None,
+                "path": default_model_path,
+                "meta_path": default_meta_path or None,
                 "source": "seeded-default",
                 "runtime": "ultralytics",
                 "task": "detection",
@@ -81,8 +84,8 @@ def _default_models_payload() -> dict[str, Any]:
                 "architecture_variant": meta.get("architecture_variant") or "unknown",
                 "class_names": list(meta.get("class_names") or []),
                 "lifecycle_status": "production",
-                "checksum_sha256": _file_sha256(DEFAULT_STICKER_MODEL_PATH),
-                "provenance": {"source_dataset_id": None, "training_job_id": None},
+                "checksum_sha256": _file_sha256(default_model_path),
+                "provenance": {},
                 "created_at": now,
             }
         ]
@@ -90,21 +93,14 @@ def _default_models_payload() -> dict[str, Any]:
 
 
 class ModelsRepository(JsonRepository):
-    def __init__(self) -> None:
-        super().__init__("models.json", _default_models_payload())
+    def __init__(self, *, default_model_path: str = "", default_meta_path: str = "") -> None:
+        super().__init__("models.json", _default_models_payload(default_model_path, default_meta_path))
 
     def list_models(self) -> list[dict]:
         return self.load()["models"]
 
     def get_model(self, model_id: int) -> dict | None:
         return next((item for item in self.list_models() if int(item["id"]) == int(model_id)), None)
-
-    def find_by_path(self, path: str) -> dict | None:
-        normalized = str(path or "").strip().lower()
-        return next(
-            (item for item in self.list_models() if str(item.get("path") or "").strip().lower() == normalized),
-            None,
-        )
 
     def find_by_name(self, name: str) -> dict | None:
         normalized = str(name or "").strip().lower()
@@ -183,10 +179,6 @@ class ModelsRepository(JsonRepository):
         runtime: str = "ultralytics",
         task: str = "detection",
         class_names: list[str] | None = None,
-        architecture_family: str | None = None,
-        architecture_variant: str | None = None,
-        source_dataset_id: str | None = None,
-        training_job_id: str | None = None,
     ) -> dict:
         payload = self.load()
         items = payload["models"]
@@ -199,14 +191,9 @@ class ModelsRepository(JsonRepository):
             "runtime": runtime,
             "task": task,
             "class_names": list(class_names or []),
-            "architecture_family": architecture_family,
-            "architecture_variant": architecture_variant,
             "lifecycle_status": "draft",
             "checksum_sha256": _file_sha256(path),
-            "provenance": {
-                "source_dataset_id": source_dataset_id,
-                "training_job_id": training_job_id,
-            },
+            "provenance": {},
             "created_at": datetime.now(UTC).isoformat(),
         }
         items.append(record)

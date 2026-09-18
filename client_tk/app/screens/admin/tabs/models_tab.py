@@ -1,20 +1,8 @@
-"""Models tab -- model registry, import, export, delete."""
+"""Models tab -- model registry, archive import, single-file upload, export, delete."""
 from __future__ import annotations
 
-import base64
 import tkinter as tk
-from pathlib import Path
-from tkinter import filedialog, ttk
-
-import customtkinter as ctk
-
-from client_tk.app.theme import (
-    ACCENT,
-    BORDER,
-    PANEL_BG,
-    TEXT_PRIMARY,
-    TEXT_SECONDARY,
-)
+from tkinter import ttk
 
 
 class ModelsTab:
@@ -56,7 +44,24 @@ class ModelsTab:
         right = ttk.LabelFrame(shell, text="Import / Detail", padding=8)
         right.grid(row=0, column=1, sticky="nsew")
 
-        import_frame = ttk.LabelFrame(right, text="Upload Model (.pt / .tflite / .onnx / .xml)", padding=6)
+        # Preferred path: a whole model package (.zip). An OpenVINO export folder
+        # (<name>.xml + .bin + metadata.yaml) zipped as-is imports straight into
+        # data/models/<name>/ with its class names.
+        archive_frame = ttk.LabelFrame(right, text="Import Model Archive (.zip)", padding=6)
+        archive_frame.pack(fill="x", pady=(0, 8))
+        a._admin_archive_name_var = tk.StringVar()
+        ttk.Label(archive_frame, text="Model Name (kosongkan = pakai nama folder di zip):").pack(anchor="w")
+        ttk.Entry(archive_frame, textvariable=a._admin_archive_name_var).pack(fill="x", pady=(2, 4))
+        ttk.Label(
+            archive_frame,
+            text="Zip berisi OpenVINO (.xml + .bin + metadata.yaml), Ultralytics (.pt), ONNX, TFLite, atau hasil Export dari aplikasi ini.",
+            foreground="#475569",
+            wraplength=380,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 4))
+        ttk.Button(archive_frame, text="Choose Zip & Import", command=a.import_model_archive).pack(anchor="w")
+
+        import_frame = ttk.LabelFrame(right, text="Upload Single Model File (.pt / .tflite / .onnx / .xml)", padding=6)
         import_frame.pack(fill="x")
         a._admin_import_path_var = tk.StringVar(value="No file selected")
         a._admin_import_name_var = tk.StringVar()

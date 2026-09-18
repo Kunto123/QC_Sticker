@@ -45,7 +45,6 @@ def start_session():
         session = inspection_session_service.start_session(
             client_id=str(payload.get("client_id") or "").strip() or str(g.current_user.id),
             camera_index=int(payload.get("camera_index") or 0),
-            camera_rotation_degrees=float(payload.get("camera_rotation_degrees") or 0),
             template_version_id=int(payload.get("template_version_id") or 0),
             line_id=str(payload.get("line_id") or "").strip() or None,
             station_id=str(payload.get("station_id") or "").strip() or None,
@@ -388,7 +387,7 @@ def export_inspections():
         "id", "inspected_at", "line_id", "station_id", "part_name",
         "decision_code", "reject_reason_code",
         "part_ready_match_ratio", "sticker_confidence",
-        "ocr_text", "ocr_confidence", "ocr_status", "anchor_offset", "pose_angle",
+        "anchor_offset", "pose_angle",
         "detected_class", "expected_class",
         "template_version_id", "push_status",
     ]

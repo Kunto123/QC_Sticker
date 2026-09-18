@@ -13,7 +13,7 @@ from backend.app.services.plc_flow_strategy import PlcFlowStrategy
 
 if TYPE_CHECKING:
     from backend.app.services.plc_adapter import PlcAdapter
-    from backend.app.models.machine_settings import StickerModeConfig
+    from backend.app.models.machine_settings import PlcIoConfig
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class StickerFlow(PlcFlowStrategy):
     def __init__(
         self,
         adapter: PlcAdapter,
-        settings: StickerModeConfig,
+        settings: PlcIoConfig,
         num_channels: int = 4,
     ):
         super().__init__(adapter, settings, num_channels)

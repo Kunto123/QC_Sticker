@@ -48,9 +48,16 @@ def _parse_yolo_output(
     h_in: int,
     has_objectness: bool = False,
 ) -> list[tuple[float, int, float, float, float, float]]:
-    """Parse YOLOv11 output array into raw candidate detections.
+    """Parse a YOLOv8/11 (or v5) raw output array into candidate detections.
 
-    Handles both [N, 6] and [6, N] layouts (auto-transposes if needed).
+    Handles both [N, C] and [C, N] layouts (auto-transposes if needed) and both
+    coordinate conventions Ultralytics exports use:
+      * OpenVINO / ONNX / .pt raw head: cx, cy, w, h in **input pixels** (0..imgsz)
+      * TFLite: cx, cy, w, h **normalized** to 0..1
+    Detected per tensor: if no box coordinate exceeds 1.5 the tensor is normalized.
+
+    Returns (conf, class_id, x1, y1, x2, y2) with x/y normalized to the letterboxed
+    *content* (padding removed), i.e. relative to the original ROI image.
 
     Args:
         has_objectness: If True, row format is [cx, cy, w, h, obj_conf, cls0, cls1, ...]
@@ -58,38 +65,40 @@ def _parse_yolo_output(
                        (YOLOv8/11). Default False.
     """
     candidates: list[tuple[float, int, float, float, float, float]] = []
-    if out is None or out.size == 0:
+    if out is None or out.size == 0 or out.ndim != 2:
+        return candidates
+    if out.shape[0] < out.shape[1]:
+        out = out.T
+    out = np.asarray(out, dtype=np.float32)
+    class_offset = 5 if has_objectness else 4
+    if out.shape[1] <= class_offset:
         return candidates
 
-    if out.ndim == 2:
-        if out.shape[0] < out.shape[1]:
-            out = out.T
-        w_content = w_in - 2 * pad_left
-        h_content = h_in - 2 * pad_top
-        class_offset = 5 if has_objectness else 4
-        for row in out:
-            class_scores = row[class_offset:]
-            base_conf = float(np.max(class_scores))
-            # YOLOv5 raw: final confidence = objectness × class score
-            conf = float(row[4]) * base_conf if has_objectness else base_conf
-            if conf < conf_threshold:
-                continue
-            class_id = int(np.argmax(class_scores))
-            xc, yc, w_b, h_b = (
-                float(row[0]),
-                float(row[1]),
-                float(row[2]),
-                float(row[3]),
-            )
-            x1_padded = (xc - w_b / 2) * w_in
-            y1_padded = (yc - h_b / 2) * h_in
-            x2_padded = (xc + w_b / 2) * w_in
-            y2_padded = (yc + h_b / 2) * h_in
-            x1 = max(0.0, (x1_padded - pad_left) / w_content) if w_content > 0 else 0.0
-            y1 = max(0.0, (y1_padded - pad_top) / h_content) if h_content > 0 else 0.0
-            x2 = min(1.0, (x2_padded - pad_left) / w_content) if w_content > 0 else 1.0
-            y2 = min(1.0, (y2_padded - pad_top) / h_content) if h_content > 0 else 1.0
-            candidates.append((conf, class_id, x1, y1, x2, y2))
+    class_scores = out[:, class_offset:]
+    conf = class_scores.max(axis=1)
+    if has_objectness:
+        conf = out[:, 4] * conf  # YOLOv5 raw: objectness × class score
+    keep = np.flatnonzero(conf >= conf_threshold)
+    if keep.size == 0:
+        return candidates
+
+    boxes = out[keep, :4]
+    if float(np.abs(boxes).max()) <= 1.5:  # normalized (TFLite export)
+        boxes = boxes * np.array([w_in, h_in, w_in, h_in], dtype=np.float32)
+    w_content = w_in - 2 * pad_left
+    h_content = h_in - 2 * pad_top
+    for idx, (xc, yc, w_b, h_b) in zip(keep.tolist(), boxes.tolist()):
+        x1_padded = xc - w_b / 2
+        y1_padded = yc - h_b / 2
+        x2_padded = xc + w_b / 2
+        y2_padded = yc + h_b / 2
+        x1 = min(1.0, max(0.0, (x1_padded - pad_left) / w_content)) if w_content > 0 else 0.0
+        y1 = min(1.0, max(0.0, (y1_padded - pad_top) / h_content)) if h_content > 0 else 0.0
+        x2 = min(1.0, max(0.0, (x2_padded - pad_left) / w_content)) if w_content > 0 else 1.0
+        y2 = min(1.0, max(0.0, (y2_padded - pad_top) / h_content)) if h_content > 0 else 1.0
+        if x2 <= x1 or y2 <= y1:
+            continue
+        candidates.append((float(conf[idx]), int(class_scores[idx].argmax()), x1, y1, x2, y2))
     return candidates
 
 
@@ -354,7 +363,6 @@ class TFLiteBackend(InferenceBackend):
             if raw_out.ndim == 2:
                 if raw_out.shape[0] < raw_out.shape[1]:
                     raw_out = raw_out.T
-                raw_box_count = int(raw_out.shape[0])
                 candidates = _parse_yolo_output(
                     raw_out,
                     float(vision.conf_threshold),
@@ -363,6 +371,7 @@ class TFLiteBackend(InferenceBackend):
                     w_in,
                     h_in,
                 )
+                raw_box_count = len(candidates)  # rows above threshold, before NMS
 
         detections = _apply_nms(candidates, float(vision.conf_threshold))
         # Scale normalized coords to pixel space
@@ -392,10 +401,6 @@ class TFLiteBackend(InferenceBackend):
         allowed_label_values = [str(label) for label in (vision.classes or []) if str(label).strip()]
         if expected_class and str(expected_class).strip():
             allowed_label_values.append(str(expected_class).strip())
-        if allowed_label_values:
-            for label in (getattr(vision, "text_anchor_class", ""), getattr(vision, "center_dot_class", "")):
-                if str(label or "").strip():
-                    allowed_label_values.append(str(label))
         allowed_labels = {label.strip().lower() for label in allowed_label_values} or None
 
         filtered = _apply_names_map(detections, names_map, allowed_labels)
@@ -572,7 +577,6 @@ class OpenVINOBackend(InferenceBackend):
             if raw_out.ndim == 2:
                 if raw_out.shape[0] < raw_out.shape[1]:
                     raw_out = raw_out.T
-                raw_box_count = int(raw_out.shape[0])
                 candidates = _parse_yolo_output(
                     raw_out,
                     float(vision.conf_threshold),
@@ -581,6 +585,7 @@ class OpenVINOBackend(InferenceBackend):
                     int(w_in),
                     int(h_in),
                 )
+                raw_box_count = len(candidates)  # rows above threshold, before NMS
 
         detections = _apply_nms(candidates, float(vision.conf_threshold))
         # Scale normalized coords to pixel space
@@ -608,10 +613,6 @@ class OpenVINOBackend(InferenceBackend):
         allowed_label_values = [str(label) for label in (vision.classes or []) if str(label).strip()]
         if expected_class and str(expected_class).strip():
             allowed_label_values.append(str(expected_class).strip())
-        if allowed_label_values:
-            for label in (getattr(vision, "text_anchor_class", ""), getattr(vision, "center_dot_class", "")):
-                if str(label or "").strip():
-                    allowed_label_values.append(str(label))
         allowed_labels = {label.strip().lower() for label in allowed_label_values} or None
         filtered = _apply_names_map(detections, names_map, allowed_labels)
 
@@ -753,15 +754,29 @@ class ONNXBackend(InferenceBackend):
 
         logger.debug("[onnx] loading model: %s", resolved_model_path)
         sess = self._load_onnx_session(str(resolved_model_path))
-        input_name = sess.get_inputs()[0].name
-        logger.debug("[onnx] input_name=%s", input_name)
+        onnx_input = sess.get_inputs()[0]
+        input_name = onnx_input.name
+        # Ultralytics ONNX export is NCHW [1, 3, 640, 640]; a TFLite-origin ONNX is NHWC.
+        # Dynamic dims come back as str/None → fall back to 640.
+        raw_shape = list(onnx_input.shape or [])
+        dims = [int(d) if isinstance(d, (int, np.integer)) and int(d) > 0 else None for d in raw_shape]
+        nchw = len(dims) == 4 and dims[1] in (1, 3)
+        if nchw:
+            h_in, w_in = dims[2] or 640, dims[3] or 640
+        elif len(dims) == 4:
+            h_in, w_in = dims[1] or 640, dims[2] or 640
+        else:
+            h_in, w_in = 640, 640
+        logger.debug("[onnx] input_name=%s shape=%s layout=%s", input_name, raw_shape, "NCHW" if nchw else "NHWC")
 
         # Preprocess: letterbox → BGR→RGB → normalize /255 → float32
-        # Model expects NHWC [1, 640, 640, 3] (TFLite-origin ONNX, channel-last)
-        _onnx_pad, _onnx_scale, _onnx_pad_left, _onnx_pad_top = self._letterbox(image, (640, 640))
+        _onnx_pad, _onnx_scale, _onnx_pad_left, _onnx_pad_top = self._letterbox(image, (h_in, w_in))
         img_rgb = cv2.cvtColor(_onnx_pad, cv2.COLOR_BGR2RGB)
         img_norm = img_rgb.astype(np.float32) / 255.0
-        input_data = img_norm[np.newaxis, ...]  # [1, 640, 640, 3]
+        if nchw:
+            input_data = np.transpose(img_norm, (2, 0, 1))[np.newaxis, ...]  # [1, 3, H, W]
+        else:
+            input_data = img_norm[np.newaxis, ...]  # [1, H, W, 3]
         t1 = _time.perf_counter()
         logger.debug("[onnx] preprocess=%.1fms", (t1 - t0) * 1000)
 
@@ -782,8 +797,8 @@ class ONNXBackend(InferenceBackend):
             float(vision.conf_threshold),
             _onnx_pad_left,
             _onnx_pad_top,
-            640,
-            640,
+            w_in,
+            h_in,
         )
 
         detections = _apply_nms(candidates, float(vision.conf_threshold))
@@ -814,10 +829,6 @@ class ONNXBackend(InferenceBackend):
         allowed_label_values = [str(label) for label in (vision.classes or []) if str(label).strip()]
         if expected_class and str(expected_class).strip():
             allowed_label_values.append(str(expected_class).strip())
-        if allowed_label_values:
-            for label in (getattr(vision, "text_anchor_class", ""), getattr(vision, "center_dot_class", "")):
-                if str(label or "").strip():
-                    allowed_label_values.append(str(label))
         allowed_labels = {label.strip().lower() for label in allowed_label_values} or None
 
         filtered = _apply_names_map(detections, names_map, allowed_labels)
@@ -986,10 +997,6 @@ class UltralyticsBackend(InferenceBackend):
         # Always include expected_class (from template sticker.expected_class)
         if expected_class and str(expected_class).strip():
             allowed_label_values.append(str(expected_class).strip())
-        if allowed_label_values:
-            for label in (getattr(vision, "text_anchor_class", ""), getattr(vision, "center_dot_class", "")):
-                if str(label or "").strip():
-                    allowed_label_values.append(str(label))
         # Normalize to lowercase for case-insensitive matching
         allowed_labels = {label.strip().lower() for label in allowed_label_values} or None
         allowed_label_keys = ({self._normalize_label_key(label) for label in allowed_label_values if self._normalize_label_key(label)} or None)

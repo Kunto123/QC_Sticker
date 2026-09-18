@@ -57,70 +57,39 @@ class StickerInferenceFilterTest(unittest.TestCase):
         self.assertEqual(detections[0]["label"], "K0W_HB0")
         self.assertEqual(detections[0]["class_id"], 0)
 
-    def test_normalize_ocr_text_applies_regex_and_canonical_map(self) -> None:
-        result = self.service.normalize_ocr_text(
-            " code: k0w hb0 ",
-            expected_text="K0W-HB0",
-            regex=r"K0W\s*HB0",
-            canonical_map={"K0WHB0": "K0W-HB0"},
-        )
-        self.assertEqual(result, "K0W-HB0")
+    # NOTE: OCR-based sticker validation was removed by design (FASE 0); the OCR
+    # helper methods and their tests were deleted 2026-09-18. See TESTING.md.
 
-    def test_parse_unique_code_uses_last_dash_segment(self) -> None:
-        self.assertEqual(self.service.parse_unique_code("VEHICLE EMISSION MODEL NAME - ADV160A"), "ADV160A")
-        self.assertEqual(self.service.parse_unique_code("CHASIS NO - CH12345678"), "CH12345678")
-        self.assertEqual(self.service.parse_unique_code("SOME TEXT WITH - DASH - CODE123"), "CODE123")
-        self.assertEqual(self.service.parse_unique_code(""), "")
-        self.assertEqual(self.service.parse_unique_code("NO DASH HERE"), "NO DASH HERE")
 
-    def test_ocr_with_flip_fallback_prefers_flipped_expected_code(self) -> None:
-        vision = VisionConfig()
+class UnloadModelTest(unittest.TestCase):
+    """unload_model must evict every cache entry for a model file (plain key and the
+    `::tN` tflite variant) plus the meta cache of its folder, so purge can delete files."""
 
-        def fake_ocr(image, vision, *, expected_text, regex, canonical_map):
-            if int(image[0, 0]) == 7:
-                return {
-                    "status": "ok",
-                    "engine": "tesseract",
-                    "text": "MODEL NAME - ADV160A",
-                    "raw_text": "MODEL NAME - ADV160A",
-                    "canonical_text": "MODEL NAME - ADV160A",
-                    "confidence": 0.91,
-                    "expected_text": expected_text,
-                    "match_expected": False,
-                    "error": None,
-                }
-            return {
-                "status": "ok",
-                "engine": "tesseract",
-                "text": "noise",
-                "raw_text": "noise",
-                "canonical_text": "noise",
-                "confidence": 0.20,
-                "expected_text": expected_text,
-                "match_expected": False,
-                "error": None,
-            }
+    def test_unload_evicts_model_and_meta_entries(self) -> None:
+        service = StickerInferenceService(AppConfig(), mock.Mock())
+        import tempfile
+        from pathlib import Path
 
-        image = np.array([[0, 0], [0, 7]], dtype=np.uint8)
-        with mock.patch.object(self.service, "_ocr_with_tesseract", side_effect=fake_ocr):
-            result = self.service._ocr_with_flip_fallback(
-                image,
-                vision,
-                expected_text="ADV160A",
-                regex=None,
-                canonical_map={},
-            )
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "m"
+            folder.mkdir()
+            model = folder / "best.xml"
+            model.write_bytes(b"x")
+            other = Path(tmp) / "other.onnx"
+            other.write_bytes(b"y")
+            resolved = str(model.resolve())
+            service._loaded_models[resolved] = object()
+            service._loaded_models[f"{resolved}::t4"] = object()
+            service._loaded_models[str(other.resolve())] = object()
+            service._meta_cache[str(folder / "best.meta.json")] = ({}, 0.0)
+            service._meta_cache[str(Path(tmp) / "other.meta.json")] = ({}, 0.0)
 
-        self.assertTrue(result["was_flipped"])
-        self.assertTrue(result["match_expected"])
-        self.assertEqual(result["canonical_text"], "MODEL NAME - ADV160A")
+            self.assertEqual(service.unload_model(str(model)), 2)
 
-    # NOTE (FASE 0): OCR-based sticker validation was removed by design. The two
-    # tests that exercised _augment_with_anchor_ocr / _augment_with_ocr_only (using
-    # the removed ocr_engine / use_ocr / ocr_expected_code / expected_dot_x/y fields)
-    # were retired. The OCR text-normalization utility tests above
-    # (_normalize_ocr_text / _parse_unique_code / flip-fallback) are kept because
-    # they test helpers that still exist. See TESTING.md + HANDOFF.md R5.
+            self.assertEqual(list(service._loaded_models), [str(other.resolve())])
+            self.assertEqual(list(service._meta_cache), [str(Path(tmp) / "other.meta.json")])
+            # unknown path is a no-op
+            self.assertEqual(service.unload_model(str(Path(tmp) / "nope.pt")), 0)
 
 
 if __name__ == "__main__":

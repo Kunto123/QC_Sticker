@@ -16,7 +16,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEMP_DATA_ROOT = Path(tempfile.mkdtemp(prefix="qc-suite-smoke-"))
 atexit.register(lambda: shutil.rmtree(TEMP_DATA_ROOT, ignore_errors=True))
 os.environ["QC_SUITE_DATA_ROOT"] = str(TEMP_DATA_ROOT)
-os.environ["QC_SUITE_STICKER_INFERENCE_MODE"] = "classic"
+# Runtime settings come from machine_settings.json, not env: classic inference, PLC off.
+(TEMP_DATA_ROOT / "json_store").mkdir(parents=True, exist_ok=True)
+(TEMP_DATA_ROOT / "json_store" / "machine_settings.json").write_text(
+    '{"version": 2, "connection": {"enabled": false, "dry_run": true}, "inference": {"mode": "classic"}}',
+    encoding="utf-8",
+)
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -61,7 +66,6 @@ def main() -> None:
 
     admin_token = _login(client, "admin", "admin123")
     operator_token = _login(client, "operator", "operator123")
-    engineer_token = _login(client, "engineer", "engineer123")
 
     templates_response = client.get("/templates", headers=_headers(operator_token))
     templates = templates_response.get_json()
@@ -118,11 +122,6 @@ def main() -> None:
         raise RuntimeError(f"Expected committed count on first part: {frame_payload}")
     if not frame_payload.get("sticker_detection", {}).get("model_path"):
         raise RuntimeError(f"Expected sticker model path metadata in payload: {frame_payload.get('sticker_detection')}")
-    validation = frame_payload.get("validation", {})
-    for field in ("ocr_status", "ocr_engine", "anchor_offset", "pose_angle"):
-        if field not in validation:
-            raise RuntimeError(f"Expected OCR/anchor observability field `{field}` in validation: {validation}")
-
     duplicate_response = client.post(
         f"/inspection/sessions/{session_payload['session_id']}/frame",
         json={"image_b64": _sample_image_b64()},
@@ -139,14 +138,6 @@ def main() -> None:
     )
     if reset_response.status_code != 200:
         raise RuntimeError(f"Reset frame failed: {reset_response.get_json()}")
-
-    dataset_response = client.post(
-        "/datasets",
-        json={"name": "smoke-dataset", "description": "Temporary smoke dataset"},
-        headers=_headers(engineer_token),
-    )
-    if dataset_response.status_code != 201:
-        raise RuntimeError(f"Dataset create failed: {dataset_response.get_json()}")
 
     summary_response = client.get("/dashboard/summary", headers=_headers(admin_token))
     if summary_response.status_code != 200:

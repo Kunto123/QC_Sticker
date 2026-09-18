@@ -221,3 +221,279 @@ or readback API to harden** — do not design hardening around the removed API.
 - `StickerEvaluator` is still not wired into `registry.py` (TODO B5); sticker uses the
   inline `_validate_sticker` path. Pinned by a test.
 - api_smoke cross-file shared state under `QC_SUITE_DATA_ROOT` — watch for flakiness.
+
+---
+
+## 7. FASE 1 EXECUTED — dead-code cleanup (2026-09-18)
+
+Section 6 items were executed, plus further dead code found by a full-repo
+reachability scan (see `.claude/DEAD_CODE_INVENTORY.md` for the verified list).
+**58 files, −8.6k lines.** Suite after cleanup: `pytest backend/tests` →
+**304 passed, 2 failed (pre-existing `test_00b`, `test_04d`), 10 skipped**.
+
+### 7a. Production code removed
+- **6a** PLC hold/release/readback env keys removed from `deploy/.env.example`
+  (the code had already gone; `README` Modbus section rewritten for the
+  accept-pulse + input-polling design).
+- **6b** OCR: all 17 OCR methods in `StickerInferenceService`, `_validate_ocr_anchor`,
+  `_validate_sticker_ocr_only`, `_normalize_code`, `_ocr_validation_fields`,
+  `_normalize_tilt_180` in `InspectionSessionService`; `anchor`/`ocr`/`geometry`
+  keys dropped from the `sticker_detection` payload; `pytesseract` dependency;
+  `ocr_runtime` health check; `ocr_*` CSV export columns.
+- Part-ready `color_profile` / `hsv` methods and the whole Calibration feature
+  (`calibration_routes.py`, `services/calibration.py`, `profiles_repository.py`,
+  admin Calibration tab, `ApiClient` profile wrappers). The dispatcher only ever
+  accepted `mean_std_threshold` / `gap_template_match`, and the admin tab called
+  `ApiClient` methods that did not exist.
+- WebSocket streaming sidecar (`backend/app/streaming/`, `client_tk/.../frame_stream.py`,
+  `shared/contracts/streaming.py`, `stream_host/port`, `websockets` dependency) —
+  the client never connected to it.
+- SQL mirrors with no importer: `postgres/sqlserver session_store.py`,
+  `*/auth_audit_repository.py`, `sqlserver/inspection_results_repository.py`.
+- `shared/contracts/inspection.py`, `repositories/filesystem/`, old
+  `TemplateEditorForm`/`StatCard`/`JsonEditor` in `template_forms.py`, and ~40
+  unreferenced methods across `plc_worker`, `gap_detector`, `text_tilt`,
+  `dataset_versions_repository`, operator/admin views and components.
+
+### 7b. Bugs fixed while removing "unreachable" code
+- `TemplatesRepository.list_versions` and `UsersRepository.set_role` had lost their
+  `def` lines (bodies were sitting unreachable after a `raise` in the previous
+  method). `POST /auth/users/<id>/role` (used by the Admin Operators tab) and
+  `GET /templates/<id>/versions` raised `AttributeError`. Headers restored.
+- `InspectionSessionService._advance_event_state` was defined twice; the first
+  (truncated) definition was deleted.
+- `scripts/smoke_api.py` logged in as `engineer/engineer123`, a user that has not
+  been seeded since the role was removed; it now uses the admin token. It still
+  stops at the frame decision without the real sticker model (same limitation as
+  the skipped api_smoke tests, §2b).
+
+### 7c. Tests deleted (obsolete tests for removed features)
+- `test_api_smoke.py`: `test_00a2_calibration_rejects_tiny_roi_profile`,
+  `test_00a3_profile_create_rejects_tiny_sampling_meta`,
+  `test_02_part_ready_color_gate_blocks_commit_until_match` (was skipped),
+  `test_08b_admin_can_update_calibration_profile`,
+  `test_08c_operator_cannot_update_calibration_profile`; calibration setup blocks
+  trimmed from `test_05` and `test_08`.
+- `test_sticker_inference.py`: the three OCR helper tests
+  (`normalize_ocr_text`, `parse_unique_code`, `_ocr_with_flip_fallback`).
+- `test_sticker_detection_gates.py`: `TiltNormalizationTest` (`_normalize_tilt_180`).
+- `client_tk/tests/test_ui_smoke.py`: 70 tests that targeted the removed
+  `EngineerScreen`, calibration UI and `TemplateEditorForm`; 23 remain.
+
+### 7d. Known state of the remaining UI smoke tests (pre-existing, not fixed)
+- Every `test_admin_*` hangs on `AdminScreen` construction under the stub API.
+- `test_operator_layout_switches_to_compact`, `test_operator_in2_cycles_template_dropdown`,
+  `test_operator_load_deployment_keeps_deployment_version` fail on HEAD too
+  (`line_value` attribute / layout row drift). Run with `-k "not test_admin_"`.
+
+### 7e. Still open — needs a product decision
+- `CounterFlow` + MachineSettings `counter` section: `set_validator_mode` is always
+  called with `"sticker"`, so it never activates.
+- `StickerEvaluator` (TODO B5) still not registered.
+- Workstation heartbeat is written by the operator screen but nothing reads
+  `/workstations`.
+- 30+ backend routes have no UI caller (inspections PATCH/DELETE, template/deployment
+  rollback, audit-log, defect-calibrate, model transition, …).
+- Placebo settings: MachineSettings `connection` section, `clamp_hold_ms`,
+  `relay_spare_address`, `clamp_feedback_timeout_ms/fallback_delay_ms`; template
+  fields `stream_fps`, `enable_ergonomic_check`/`ergonomic_*`, `logo_ref_path`,
+  `calibration_*`, `gap_ref_type`, `gap_hsv_*`, `gap_padding_px`,
+  `commit_stable_frames`, `part_ready_settle_frames`, `color_profile_id`,
+  `hsv_lower/upper` are persisted and shown but never read by the pipeline.
+
+---
+
+## 8. Sticker-only + JSON-only config (2026-09-18, same day as §7)
+
+User decisions: (1) QC Sticker is the only validation mode — delete counter/defect;
+(2) drop the max-tilt field and the rotation controls (camera and per-ROI) because
+they are unused; (3) everything editable in Admin → Machine Settings lives in
+`machine_settings.json` only, `.env` keeps secrets + bootstrap, the rest is hardcoded.
+Suite after: **243 passed, 2 failed (pre-existing `test_00b`, `test_04d`), 9 skipped**.
+
+### 8a. Removed
+- Tilt subsystem: `services/text_tilt.py`, `_estimate_tilt_from_roi`, tilt telemetry
+  and the `OUT_OF_ANGLE` gate in `_validate_sticker`, `StickerRule.expected_tilt_degrees /
+  max_tilt_degrees / tilt_gate_enabled / edge_* / morph_* / white_hsv_* /
+  min_text_*`, the Templates-tab "Max Tilt" + "Aktifkan cek miring" widgets.
+  `INSPECT_HARD_REJECT_REASONS` is now the constant `"WRONG_TYPE"`. The enum value
+  `OUT_OF_ANGLE` stays for old records.
+- Rotation: `CameraDefaults.rotation_degrees`, `_apply_rotation`, the session
+  `camera_rotation_degrees` override, `QC_SUITE_CAMERA_DEFAULT_ROTATION_DEGREES`,
+  `RoiGeometry.rotation`, the ROI-picker "Rotasi ROI" spinbox, rotated overlay
+  drawing on both screens, `_crop_stage_roi` / `save_ref_patch` warps.
+- Counter / defect modes: `services/evaluators/` (whole package incl. the never-wired
+  `StickerEvaluator`), `anomaly_backend.py`, `counter_flow.py`, `defect_flow.py`,
+  `ng_cache_logger.py`, `POST /templates/<id>/defect-calibrate`, `InspectionTemplate.mode /
+  criteria / component_rois`, `ComponentClassTarget`, `ComponentRoiRule`,
+  `normalize_mode`, `validate_criteria` (→ `validate_sticker_rule`),
+  `StickerRule.validator_mode` + `ROI_CLASS_VALIDATOR_MODES`, the `ACCEPT_CANDIDATE`
+  stabilising branch, counter/defect reason codes, `client_tk/app/mode_utils.py`,
+  the mode radio + component/defect ROI editors in the Templates tab, counter/defect
+  overlays on the operator screen, the "Mode" column in both admin tables,
+  `MachineSettings.counter`. `SessionState` lost `component_count_history`,
+  `consecutive_component_ok`, `expected_logo_edge`, `hsv_adaptive_*`.
+- Placebo fields: `VisionConfig.stream_fps / enable_ergonomic_check / ergonomic_* /
+  text_anchor_class / center_dot_class / anchor_crop_*`, `PartReadyConfig.gap_ref_type /
+  gap_hsv_* / gap_padding_px / color_profile_id / colorspace / distance_threshold /
+  hsv_* / hsv_adaptive* / calibration_* / logo_ref_path`, `RoiGeometry.width`,
+  `StickerRule.commit_stable_frames / part_ready_settle_frames`,
+  `TimingConfig.hard_reject_stable_frames / hard_reject_stable_ms` (no consumer once
+  the counter hard-reject branch went), `io.relay_spare_address / clamp_hold_ms /
+  clamp_feedback_timeout_ms / clamp_feedback_fallback_delay_ms`.
+
+### 8b. Config model
+- `.env` (see `deploy/.env.example`): `QC_SUITE_ENV`, `QC_SUITE_SECRET_KEY`,
+  `QC_SUITE_DATA_ROOT`, `QC_SUITE_LOCAL_ONLY`, `QC_SUITE_SERVER_URL`, `QC_SUITE_HOST`,
+  `QC_SUITE_PORT`, `QC_SUITE_DEBUG`, `QC_SUITE_DATABASE_BACKEND` + `POSTGRESQL_*` /
+  `MSSQL_*`, and the client camera/upload keys. **58 `QC_SUITE_*` keys are no longer
+  read** (all `PLC_*`, all timing, `STICKER_INFERENCE_MODE`, `DEFAULT_STICKER_MODEL_*`,
+  `DEVICE`, `CUDA_DEVICE_ID`, `INFERENCE_*`, `TRAINING_*`, `PUSH_WORKER_*`, `GPU_FAIL_FAST`,
+  `ACCESS_LOGS_ENABLED`, `WERKZEUG_*`, `SQL_ENABLED`, `ACCESS_TOKEN_TTL_SECONDS`,
+  `NG_LOG_DIR`, `GEOMETRIC_AUGMENT_ENABLED`, `PART_READY_*`, `INSPECT_HARD_REJECT_REASONS`).
+- `machine_settings.json` v2: `connection`, `io` (v1 `sticker` is read as `io`),
+  `timing`, `inference` (`mode`, `device`, `cuda_device_id`, `num_threads`, `timeout_s`,
+  `default_model_path`, `default_model_meta_path`). `MachineSettingsRepository` has no
+  seed logic; `POST /machine-settings/seed` and the "Re-seed from .env" button are gone.
+- `AppConfig` keeps the same attribute names for services; `apply_machine_settings()`
+  fills them at boot. Fixed constants: `TRAINING_*`, `PUSH_WORKER_*`, `GPU_FAIL_FAST=True`,
+  `TRAINING_WEIGHTS_DOWNLOAD_ALLOWED=True`, `GEOMETRIC_AUGMENT_ENABLED=False`,
+  `ACCESS_TOKEN_TTL_SECONDS=86400`; access/werkzeug logs follow `QC_SUITE_DEBUG`.
+- `ModelsRepository` / `TemplatesRepository` take `default_model_path` / `default_meta_path`
+  constructor args (container passes `inference.*`) instead of import-time constants.
+- `PlcWorker(adapter, *, num_channels, dry_run)` + `apply_machine_settings(settings)`
+  replace the old constructor kwargs / `set_validator_mode` / `configure_guards`.
+  `build_plc_adapter(PlcConnectionConfig)`. `TrainingWorker._training_mode` is a
+  property that reads `app_config.training_engine_mode` at job time (tests set it on
+  `container.app_config`).
+
+### 8c. Tests
+- Deleted: `test_evaluators.py`, `fixtures/golden_template_{counter,defect}.json`,
+  `test_api_smoke::test_04b_roi_class_validator_mode_ignores_position_gate`,
+  `test_api_smoke::test_13g_commit_stable_frames_does_not_override_settle_ms`,
+  `test_training_metrics::LoggingToggleConfigTest`, `TiltGateToggleTest` (13 tests).
+- Rewritten: `test_golden_templates.py` (sticker fixture only; asserts legacy keys are
+  dropped), `test_templates_contract.py` (sticker-only contract),
+  `test_sticker_detection_gates.py::StickerValidateGateTest` (3 tests: accept,
+  WRONG_TYPE, LOW_ROI_CONF), `test_plc_modbus_adapter.py` / `test_plc_worker_feedback.py`
+  (new worker API), `test_training_metrics::test_gpu_job_does_not_fail_when_gpu_fail_fast_disabled`
+  (sets the attribute instead of env). `test_api_smoke.py` writes a
+  `machine_settings.json` (inference mode `classic`, PLC off) into its temp data root
+  before importing the app and sets `training_engine_mode="simulated"` on the container
+  config — the env vars it used to set are gone.
+
+### 8d. Migration notes for a production PC
+- Existing v1 `machine_settings.json` files load unchanged (`sticker`→`io`, `counter`
+  ignored). Values that used to come from `.env` and were never saved to the JSON
+  (typically the `inference` section, and `connection` on PCs where the JSON was seeded
+  with `enabled=false`) now use defaults until set in Admin → Machine Settings.
+- **`connection` is authoritative now.** On this dev machine the JSON says
+  `enabled=true, dry_run=false, transport=fx, COM3` — booting will open the FX port for
+  real and, without the PLC, block commits with `plc_unhealthy_commit_blocked`. Set
+  `dry_run` or `enabled` in the tab (or edit the JSON) before running here.
+- Templates with `vision.model_path` set are unaffected; templates that relied on the env
+  default model need `inference.default_model_path` filled in the tab once.
+
+## 9. Data + Training removed; model import made real (2026-09-18, same day as §7/§8)
+
+User decision: training happens in other software. This app only **imports finished
+models**; the important case is an Ultralytics OpenVINO export folder zipped as-is,
+which must land in `data/models/<name>/` automatically. Suite after:
+**backend 170 passed, 2 failed (pre-existing `test_00b`, `test_04d`), 7 skipped** (incl. §9d);
+client unit tests 9 passed. Production code is now ~21.5k lines (was 26.9k after §8).
+
+### 9a. Removed
+- Backend: `repositories/{datasets,dataset_versions,augment,training}_repository.py`,
+  `workers/{training,augment}_worker.py`, `services/training.py`,
+  `core/label_geometry.py`, `core/model_catalog.py`, `shared/contracts/augment.py`;
+  all `/datasets*`, `/augment*`, `/train*` routes (`workstation_routes.py` keeps only
+  `/models*` and `/workstations*`); `container.py` no longer starts `AugmentWorker`;
+  `config.py` lost `DATASETS_DIR`, `TRAINING_*`, `GPU_FAIL_FAST`,
+  `TRAINING_WEIGHTS_DOWNLOAD_ALLOWED`, `GEOMETRIC_AUGMENT_ENABLED`;
+  `ModelsRepository.add_model` lost `architecture_*`, `source_dataset_id`,
+  `training_job_id` (old registry rows keep whatever they had — nothing reads it).
+- Client: Admin tabs **Data** and **Training** (`_build_data_tab`, `_build_training_tab`,
+  every `_admin_annot_*` / dataset / augment / training handler, ~1.3k lines),
+  `components/annotation_canvas.py`, the dataset/annotation/augment/training wrappers
+  in `api_client.py`. Tab order is now Templates · Models · Operators · Monitor ·
+  Machine Settings.
+- `scripts/smoke_api.py` no longer creates a dataset; `scripts/bootstrap_env.py` no
+  longer expects `data/datasets/`.
+
+### 9b. Model import / export (rewritten `services/model_export_service.py`)
+- `POST /models/import` (`zip_file` multipart or `content_b64` JSON; optional `name`,
+  `target_lifecycle`, `skip_validation`, `force_rename`) accepts any zip with **exactly
+  one** model at any depth: `.xml`+`.bin` (OpenVINO), `.pt`, `.onnx`, `.tflite`.
+  Class names come from `<stem>.meta.json` / `metadata.json` (`class_names` or
+  `names`) or Ultralytics `metadata.yaml` (`names:` map). `__MACOSX/` and dot-entries
+  are ignored. Legacy v1 exports (`weights.pt` + `metadata.json` + `EXPORT_MANIFEST.json`)
+  still import, with checksum validation.
+- Every import lands in its own folder `data/models/<safe name>[_N]/` and always gets a
+  `<stem>.meta.json` written (`class_names`, `runtime`, `name`, `source_archive`,
+  `imported_at`) — that file is the **only** place the ONNX/OpenVINO/TFLite backends
+  read class names from. Missing names → import succeeds with a warning and numeric
+  labels. The registry row has `source="import"`, `runtime` from the extension,
+  `meta_path` set. Failure anywhere rolls back the folder and the registry row.
+- Name resolution: explicit `name` → manifest/metadata name → top folder in the zip →
+  archive filename. A clash gets ` [IMPORTED <ts>]`; the folder gets `_N`.
+- `POST /models/<id>/export` zips `<name>/<all files in the model folder>` +
+  `<name>/metadata.json` + `EXPORT_MANIFEST.json` (export_version `2.0`); an exported
+  zip re-imports on another PC unchanged (round-trip test).
+- `POST /models/upload` (single file, base64) now also writes `<stem>.meta.json` when
+  `class_names` are sent; the client reads a sibling `metadata.yaml` /
+  `<stem>.meta.json` next to the chosen file and sends them.
+- `DELETE /models/<id>?purge_files=1` calls `StickerInferenceService.unload_model()`
+  first (OpenVINO memory-maps the `.bin`; on Windows the folder cannot be deleted while
+  compiled) and reports only what was really removed, plus `purge_warning` when files
+  stayed behind.
+- Client Models tab: new **Import Model Archive (.zip)** section (optional name →
+  `import_model_archive`, runs async, shows runtime/folder/classes/warnings);
+  **Export** now asks for a save path and writes the bytes (it used to discard them and
+  say "Export started.").
+- `openvino>=2024.0,<2026.0` added to `pyproject.toml` (was missing; the backend
+  existed but could never load). Installed in `.qc` (2025.4.1).
+
+### 9c. Tests
+- Deleted: `test_dataset_versioning.py`, `test_training_metrics.py`,
+  `test_training_worker_data_yaml.py`, `test_training_worker_model_resolution.py`,
+  `test_model_catalog.py`; `test_sticker_detection_gates.py` Phases 4–7
+  (`TrainingWorker`); 16 dataset/augment/training tests in `test_api_smoke.py`
+  (`test_09b` kept as `test_09b_workstation_heartbeat_list_and_delete`); the
+  annotation/augment/`AnnotationCanvas` tests and stub methods in
+  `client_tk/tests/test_ui_smoke.py`.
+- Rewritten: `test_model_export_import.py` (24 tests: OpenVINO zip → folder +
+  `.meta.json` + registry, explicit name, root-level files, `__MACOSX`, missing `.bin`,
+  missing yaml warning, two models / no model / not-a-zip rejected, duplicate name,
+  lifecycle, rollback, `.pt`/`.onnx`/`.tflite`, legacy v1, checksum mismatch, export
+  round-trip, purge). Added `test_sticker_inference.py::UnloadModelTest`.
+- `test_ui_smoke.py::_StubApi` gained the Machine Settings methods
+  (`get_machine_settings`, `update_machine_settings`, `get_plc_diagnostics`,
+  `test_plc_coil`, `plc_all_off`) and the setUp patches
+  `machine_settings_tab.messagebox.showerror`. **This was the "hang"**: the tab's load
+  error opened a modal dialog. `test_admin_screen_initializes` now passes in ~3 s.
+  Remaining failures in that file are pre-existing test/code drift (e.g. tests set
+  `preset_line_var`, which no longer exists) — see the run log in SESSION_LOG.
+- Verified end-to-end outside pytest: a real (tiny) OpenVINO IR built with the
+  `openvino` API, zipped Ultralytics-style, imported through `ApiClient` in local
+  mode, loaded by the real OpenVINO backend (`predict` returned `sticker` /
+  `sticker_bad` labels from the written `.meta.json`), exported, deleted with purge
+  (folder gone).
+
+### 9d. Bug found on first real use: OpenVINO boxes were off-screen (fixed 2026-09-18)
+
+User imported a YOLO11n OpenVINO export, set the template to `expected_class=person`,
+conf 0.05, and saw "raw detection 8400, nothing on screen". Root cause in
+`inference_backend.py::_parse_yolo_output`: it assumed cx,cy,w,h are normalized 0..1
+(true only for Ultralytics **TFLite** exports) and multiplied by imgsz — Ultralytics
+OpenVINO / ONNX exports emit **input pixels** (0..640), so every bbox became e.g.
+`[117412, 254957, 810, 1080]`: nothing drawable, NMS could not merge (38 "persons"),
+position gate always failed. Fix: the parser detects the unit per tensor (max coord
+≤ 1.5 → normalized), is vectorised for the threshold pass, drops degenerate boxes,
+and `raw_detection_count` now means "rows above threshold before NMS" on OpenVINO and
+TFLite too (it used to be the anchor count, 8400, on those two — ONNX/Ultralytics
+already reported candidates). Also fixed while there: the ONNX backend hard-coded NHWC
+640×640 ("TFLite-origin ONNX"); it now reads the session's input shape, so a normal
+Ultralytics ONNX export (NCHW) runs. Not handled: exports made with `nms=True`
+(`[1, 300, 6]` xyxy+conf+cls) — different format, not a raw head.
+Verified on `ultralytics/assets/bus.jpg` with the user's model: 4 persons + bus at
+sane pixel boxes. Tests: `backend/tests/test_inference_backend_parse.py` (10).

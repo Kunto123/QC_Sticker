@@ -24,7 +24,6 @@ class Decision:
         detected_class: str | None
         confidence: float | None
         bbox: dict | None
-        tilt: dict  (angle, expected, deviation, threshold)
         thresholds: dict
         backend: str | None
         model_path: str | None

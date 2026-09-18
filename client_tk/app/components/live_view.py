@@ -92,15 +92,6 @@ class LiveView(ctk.CTkFrame):
         except tk.TclError:
             return
 
-    def update_b64(self, image_b64: str | None) -> None:
-        if not image_b64:
-            return
-        raw = base64.b64decode(image_b64)
-        arr = np.frombuffer(raw, np.uint8)
-        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if frame is not None:
-            self.update_bgr(frame)
-
     def reset(self) -> None:
         self._source_frame = None
         self._photo = None

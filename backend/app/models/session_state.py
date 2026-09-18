@@ -40,9 +40,6 @@ class SessionState:
     last_committed_result: dict[str, Any] | None = None
     part_ready_ratio_history: list[float] = field(default_factory=list)
     part_ready_ema_ratio: float = -1.0
-    # Adaptive HSV thresholds — updated at runtime when hsv_adaptive=True
-    hsv_adaptive_lower: list[float] | None = None
-    hsv_adaptive_upper: list[float] | None = None
     last_overlay_b64: str | None = None
     # Settle-time debounce: timestamp of the first frame where part_ready was True
     # in the current ready-run.  Reset to None whenever part_ready becomes False or
@@ -125,11 +122,6 @@ class SessionState:
     awaiting_part_removal_after_commit: bool = False
     policy_holdover_expires_at: datetime | None = None
     part_absent_started_at: datetime | None = None
-    # ── Component Count Mode ──
-    component_count_history: list = field(default_factory=list)
-    consecutive_component_ok: int = 0
-    # ── Logo Anti-Reclamp ──
-    expected_logo_edge: object = None  # np.ndarray | None
     # ── Inference Result Cache for Hand-Obstruction Handling ──
     # When YOLO detects a valid class but part_ready drops temporarily (e.g., hand
     # obstructing during commit wait), we cache the last valid inference result and

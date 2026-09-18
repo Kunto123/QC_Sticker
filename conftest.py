@@ -30,8 +30,9 @@ if str(PROJECT_ROOT) not in sys.path:
 def _seed_default_sticker_model_env() -> None:
     """Point the seeded model registry at a real .pt file if one ships in-repo.
 
-    ``models_repository._default_models_payload`` returns an EMPTY registry when
-    ``QC_SUITE_DEFAULT_STICKER_MODEL_PATH`` is blank. A generic YOLO weight file
+    The app itself no longer reads this env var: ``test_api_smoke.py`` copies it into
+    ``machine_settings.inference.default_model_path`` in its temp data root, and the
+    registry seeds from there. A generic YOLO weight file
     is enough to make the registry non-empty (test_00b) and to give the classic
     sticker pipeline a model_path — it is NOT enough to make the pipeline detect
     the synthetic test sticker (that needs the real 'AKH Sticker Detector'

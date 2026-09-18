@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -339,6 +341,37 @@ class QcSuiteDesktopApp(ctk.CTk):
 
     def _on_close(self) -> None:
         self._teardown_screen()
+        self.destroy()
+
+    # ── Restart (Machine Settings → Connection / Inference changes) ──
+
+    def can_restart_backend(self) -> bool:
+        """True when restarting this process also restarts the backend: embedded
+        local-only mode, or split mode launched by scripts/run_desktop.py (which owns
+        the backend subprocess). A remote backend cannot be restarted from here."""
+        if self.local_only:
+            return True
+        return Path(sys.argv[0]).name == "run_desktop.py"
+
+    def restart_app(self) -> None:
+        """Shut this process down cleanly and relaunch the same command line.
+
+        Order matters: release the camera and stop the PLC worker (all coils off,
+        port closed) BEFORE the detached relauncher is spawned, then exit. The
+        relauncher waits until this pid is gone, so in split mode the old backend
+        subprocess is already terminated when the new one binds its port."""
+        from client_tk.app.services.app_restart import schedule_relaunch
+
+        self._teardown_screen()
+        if self.local_only:
+            try:
+                from backend.app.core.shutdown import shutdown_workers
+                shutdown_workers(reason="restart")
+            except Exception:  # noqa: BLE001
+                pass
+        argv = [sys.executable, str(Path(sys.argv[0]).resolve()), *sys.argv[1:]]
+        data_root = Path(os.getenv("QC_SUITE_DATA_ROOT", str(PROJECT_ROOT / "data")))
+        schedule_relaunch(argv, cwd=os.getcwd(), log_path=data_root / "restart.log")
         self.destroy()
 
 

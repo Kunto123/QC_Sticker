@@ -21,7 +21,6 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 
@@ -35,6 +34,7 @@ from backend.app.services.plc_adapter import (
     ModbusTcpPlcAdapter,
     build_plc_adapter,
 )
+from backend.app.models.machine_settings import MachineSettings, PlcConnectionConfig, PlcIoConfig
 from backend.app.workers.plc_worker import PlcWorker
 
 
@@ -60,22 +60,23 @@ def _make_mock_client(*, input_bits=None) -> mock.MagicMock:
     return client
 
 
-def _make_config(**overrides) -> SimpleNamespace:
+def _make_config(**overrides) -> PlcConnectionConfig:
     defaults = dict(
-        plc_dry_run=False,
-        plc_transport="tcp",
-        plc_timeout_ms=750,
-        plc_modbus_unit_id=7,
-        plc_host="10.0.0.5",
-        plc_port=502,
-        plc_serial_port="COM3",
-        plc_serial_baudrate=9600,
-        plc_serial_parity="N",
-        plc_serial_bytesize=8,
-        plc_serial_stopbits=1,
+        enabled=True,
+        dry_run=False,
+        transport="tcp",
+        timeout_ms=750,
+        modbus_unit_id=7,
+        host="10.0.0.5",
+        port=502,
+        serial_port="COM3",
+        serial_baudrate=9600,
+        serial_parity="N",
+        serial_bytesize=8,
+        serial_stopbits=1,
     )
     defaults.update(overrides)
-    return SimpleNamespace(**defaults)
+    return PlcConnectionConfig(**defaults)
 
 
 class DryRunPlcAdapterTest(unittest.TestCase):
@@ -172,26 +173,26 @@ class ModbusRtuPlcAdapterTest(unittest.TestCase):
 
 class BuildPlcAdapterTest(unittest.TestCase):
     def test_dry_run_selected_when_flag_set(self) -> None:
-        adapter = build_plc_adapter(_make_config(plc_dry_run=True))
+        adapter = build_plc_adapter(_make_config(dry_run=True))
         self.assertIsInstance(adapter, DryRunPlcAdapter)
 
     def test_tcp_selected(self) -> None:
         mc = _make_mock_client()
         with mock.patch("backend.app.services.plc_adapter.ModbusTcpClient", return_value=mc) as Cls:
-            adapter = build_plc_adapter(_make_config(plc_transport="tcp"))
+            adapter = build_plc_adapter(_make_config(transport="tcp"))
         self.assertIsInstance(adapter, ModbusTcpPlcAdapter)
         Cls.assert_called_once_with(host="10.0.0.5", port=502, timeout=0.75)
 
     def test_rtu_selected(self) -> None:
         mc = _make_mock_client()
         with mock.patch("backend.app.services.plc_adapter.ModbusSerialClient", return_value=mc):
-            adapter = build_plc_adapter(_make_config(plc_transport="rtu"))
+            adapter = build_plc_adapter(_make_config(transport="rtu"))
         self.assertIsInstance(adapter, ModbusRtuPlcAdapter)
 
     def test_unknown_transport_falls_back_to_dry_run(self) -> None:
         # NEW design: unknown transport degrades to DryRun (does NOT raise). This is
         # the intended behavior of the minimal factory.
-        adapter = build_plc_adapter(_make_config(plc_transport="banana"))
+        adapter = build_plc_adapter(_make_config(transport="banana"))
         self.assertIsInstance(adapter, DryRunPlcAdapter)
 
 
@@ -227,10 +228,10 @@ class PlcWorkerInputPollingTest(unittest.TestCase):
         def status(self) -> dict:
             return {}
 
-    def _worker(self, adapter) -> PlcWorker:
-        # IN1=release@0, IN2=template@1 (constructor defaults). Fast debounce.
-        w = PlcWorker(adapter, num_channels=4)
-        w.configure_guards(release_input_debounce_ms=0, dry_run=True)
+    def _worker(self, adapter, *, release_input_debounce_ms: int = 0) -> PlcWorker:
+        # IN1=release@0, IN2=template@1 (PlcIoConfig defaults). Fast debounce.
+        w = PlcWorker(adapter, num_channels=4, dry_run=True)
+        w.apply_machine_settings(MachineSettings(io=PlcIoConfig(release_input_debounce_ms=release_input_debounce_ms)))
         return w
 
     def test_input1_manual_release_triggers_all_off_after_stable_debounce(self) -> None:
@@ -246,8 +247,7 @@ class PlcWorkerInputPollingTest(unittest.TestCase):
     def test_input1_high_but_not_yet_stable_does_not_release(self) -> None:
         # With a long debounce, a single poll of IN1 HIGH must NOT release yet.
         adapter = self._FakeAdapter([True, False, False, False, False, False, False, False])
-        worker = PlcWorker(adapter, num_channels=4)
-        worker.configure_guards(release_input_debounce_ms=10_000, dry_run=True)
+        worker = self._worker(adapter, release_input_debounce_ms=10_000)
         worker._poll_inputs()  # noqa: SLF001
         self.assertEqual(adapter.coil_writes, [], "must not release before debounce elapses")
 

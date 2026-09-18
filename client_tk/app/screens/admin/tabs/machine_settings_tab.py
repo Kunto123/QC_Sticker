@@ -1,10 +1,11 @@
-"""Machine Settings tab — PLC I/O + timing + transport config UI.
+"""Machine Settings tab — the UI for data/json_store/machine_settings.json.
 
-Admin-only tab for configuring:
-  - Connection/transport (TCP/RTU, addresses, timeouts)
-  - I/O address map (single unified section — not split by mode)
-  - Timer / inspection policy settings (stable_ms, delays, etc.)
-  - Diagnostics (live status, test coil, read inputs)
+Sections (mirror backend/app/models/machine_settings.py):
+  - connection  PLC transport (restart required)
+  - io          relay / input addresses + PLC timing (applied live)
+  - timing      inspection timers / commit policy (applied live)
+  - inference   sticker model runtime (restart required)
+  - Diagnostics (live status, test coil, all-off)
 """
 from __future__ import annotations
 
@@ -60,11 +61,14 @@ class MachineSettingsTab:
         # ── Timer / Inspection Policy section ──
         self._build_timing_section(body, 2)
 
+        # ── Inference section ──
+        self._build_inference_section(body, 3)
+
         # ── Diagnostics section ──
-        self._build_diagnostics_section(body, 3)
+        self._build_diagnostics_section(body, 4)
 
         # ── Action buttons ──
-        self._build_actions(body, 4)
+        self._build_actions(body, 5)
 
     def _section_frame(self, parent, row: int, title: str) -> ctk.CTkFrame:
         section = ctk.CTkFrame(parent, fg_color=PANEL_ALT_BG, corner_radius=12, border_width=1, border_color=BORDER)
@@ -75,13 +79,13 @@ class MachineSettingsTab:
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 6))
         return section
 
-    def _add_field(self, parent, row: int, label: str, key: str, default: str = "") -> tk.StringVar:
+    def _add_field(self, parent, row: int, label: str, key: str, default: str = "", *, width: int = 120) -> tk.StringVar:
         var = tk.StringVar(value=default)
         self._field_vars[key] = var
         ctk.CTkLabel(parent, text=f"{label}:", font=("Segoe UI", 9, "bold"), text_color=TEXT_PRIMARY).grid(
             row=row, column=0, sticky="w", padx=(12, 8), pady=2,
         )
-        entry = ctk.CTkEntry(parent, textvariable=var, width=120)
+        entry = ctk.CTkEntry(parent, textvariable=var, width=width)
         entry.grid(row=row, column=1, sticky="w", padx=(0, 12), pady=2)
         return var
 
@@ -95,11 +99,11 @@ class MachineSettingsTab:
     # ── Connection section ───────────────────────────────────────────
 
     def _build_connection_section(self, parent, row: int) -> None:
-        sec = self._section_frame(parent, row, "Connection / Transport")
+        sec = self._section_frame(parent, row, "Connection / Transport  (perlu restart backend)")
         r = 1
         self._add_checkbox(sec, r, "Enabled", "connection.enabled"); r += 1
         self._add_checkbox(sec, r, "Dry Run (log only)", "connection.dry_run"); r += 1
-        self._add_field(sec, r, "Transport (tcp/rtu)", "connection.transport", "tcp"); r += 1
+        self._add_field(sec, r, "Transport (tcp/rtu/fx)", "connection.transport", "tcp"); r += 1
         self._add_field(sec, r, "Host", "connection.host", "127.0.0.1"); r += 1
         self._add_field(sec, r, "Port", "connection.port", "5020"); r += 1
         self._add_field(sec, r, "Serial Port", "connection.serial_port", ""); r += 1
@@ -113,39 +117,30 @@ class MachineSettingsTab:
     # ── Unified I/O Addresses section ─────────────────────────────────
 
     def _build_io_section(self, parent, row: int) -> None:
-        sec = self._section_frame(parent, row, "I/O Addresses (All Modes)")
+        sec = self._section_frame(parent, row, "I/O Addresses")
 
         r = 1
         ctk.CTkLabel(
             sec, text="Relay Coil Addresses", font=("Segoe UI", 9, "bold"), text_color=TEXT_SECONDARY,
         ).grid(row=r, column=0, columnspan=2, sticky="w", padx=12, pady=(4, 0)); r += 1
-        self._add_field(sec, r, "CH3 — Clamp", "sticker.relay_clamp_address", "3"); r += 1
-        self._add_field(sec, r, "CH2 — OK Light+Buzzer", "sticker.relay_ok_light_buzzer_address", "2"); r += 1
-        self._add_field(sec, r, "CH1 — Enji Buzzer", "sticker.relay_enji_buzzer_address", "1"); r += 1
-        self._add_field(sec, r, "CH4 — Spare", "sticker.relay_spare_address", "0"); r += 1
+        self._add_field(sec, r, "CH3 — Clamp", "io.relay_clamp_address", "3"); r += 1
+        self._add_field(sec, r, "CH2 — OK Light+Buzzer", "io.relay_ok_light_buzzer_address", "2"); r += 1
+        self._add_field(sec, r, "CH1 — Enji Buzzer", "io.relay_enji_buzzer_address", "1"); r += 1
 
         ctk.CTkLabel(
             sec, text="Input Addresses", font=("Segoe UI", 9, "bold"), text_color=TEXT_SECONDARY,
         ).grid(row=r, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 0)); r += 1
-        self._add_field(sec, r, "IN0 — Sensor (Counter)", "counter.input_sensor_address", "0"); r += 1
-        self._add_field(sec, r, "IN1 — Release", "sticker.input_release_address", "0"); r += 1
-        self._add_field(sec, r, "IN2 — Template Cycle", "sticker.input_template_address", "1"); r += 1
-        self._add_field(sec, r, "IN3 — Clamp Feedback", "sticker.input_clamp_engaged_address", "2"); r += 1
-
-        ctk.CTkLabel(
-            sec, text="Clamp Feedback", font=("Segoe UI", 9, "bold"), text_color=TEXT_SECONDARY,
-        ).grid(row=r, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 0)); r += 1
-        self._add_checkbox(sec, r, "Clamp Feedback Enabled", "sticker.clamp_feedback_enabled"); r += 1
-        self._add_field(sec, r, "Feedback Timeout (ms)", "sticker.clamp_feedback_timeout_ms", "1500"); r += 1
-        self._add_field(sec, r, "Feedback Fallback Delay (ms)", "sticker.clamp_feedback_fallback_delay_ms", "300"); r += 1
+        self._add_field(sec, r, "IN1 — Release", "io.input_release_address", "0"); r += 1
+        self._add_field(sec, r, "IN2 — Template Cycle", "io.input_template_address", "1"); r += 1
+        self._add_field(sec, r, "IN3 — Clamp Feedback", "io.input_clamp_engaged_address", "2"); r += 1
+        self._add_checkbox(sec, r, "Clamp Feedback Enabled", "io.clamp_feedback_enabled"); r += 1
 
         ctk.CTkLabel(
             sec, text="PLC Timing", font=("Segoe UI", 9, "bold"), text_color=TEXT_SECONDARY,
         ).grid(row=r, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 0)); r += 1
-        self._add_field(sec, r, "Accept Pulse (ms)", "sticker.accept_pulse_ms", "1000"); r += 1
-        self._add_field(sec, r, "Clamp Hold (ms)", "sticker.clamp_hold_ms", "2000"); r += 1
-        self._add_field(sec, r, "Min Reclamp Interval (ms)", "sticker.min_reclamp_interval_ms", "3000"); r += 1
-        self._add_field(sec, r, "Release Debounce (ms)", "sticker.release_input_debounce_ms", "200"); r += 1
+        self._add_field(sec, r, "Accept Pulse (ms)", "io.accept_pulse_ms", "1000"); r += 1
+        self._add_field(sec, r, "Min Reclamp Interval (ms)", "io.min_reclamp_interval_ms", "3000"); r += 1
+        self._add_field(sec, r, "Release Debounce (ms)", "io.release_input_debounce_ms", "200"); r += 1
 
     # ── Timer / Inspection Policy section ──────────────────────────────
 
@@ -164,8 +159,6 @@ class MachineSettingsTab:
         ).grid(row=r, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 0)); r += 1
         self._add_field(sec, r, "Accept — Stable Frames", "timing.accept_stable_frames", "1"); r += 1
         self._add_field(sec, r, "Accept — Stable (ms)", "timing.accept_stable_ms", "200"); r += 1
-        self._add_field(sec, r, "Hard Reject — Stable Frames", "timing.hard_reject_stable_frames", "3"); r += 1
-        self._add_field(sec, r, "Hard Reject — Stable (ms)", "timing.hard_reject_stable_ms", "500"); r += 1
 
         ctk.CTkLabel(
             sec, text="Commit Guard", font=("Segoe UI", 9, "bold"), text_color=TEXT_SECONDARY,
@@ -191,6 +184,23 @@ class MachineSettingsTab:
         ).grid(row=r, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 0)); r += 1
         self._add_field(sec, r, "Session Idle Timeout (s)", "timing.session_idle_timeout_s", "300"); r += 1
         self._add_field(sec, r, "Max Consecutive Rejects", "timing.max_consecutive_rejects", "0"); r += 1
+
+    # ── Inference section ─────────────────────────────────────────────
+
+    def _build_inference_section(self, parent, row: int) -> None:
+        sec = self._section_frame(parent, row, "Inference / Model  (perlu restart backend)")
+        r = 1
+        self._add_field(sec, r, "Mode (auto/ultralytics/onnx/openvino/tflite/classic)", "inference.mode", "auto"); r += 1
+        self._add_field(sec, r, "Device (auto/cpu/cuda)", "inference.device", "auto"); r += 1
+        self._add_field(sec, r, "CUDA Device ID", "inference.cuda_device_id", "0"); r += 1
+        self._add_field(sec, r, "CPU Threads", "inference.num_threads", "4"); r += 1
+        self._add_field(sec, r, "Inference Timeout (s)", "inference.timeout_s", "5.0"); r += 1
+        self._add_field(sec, r, "Default Model Path", "inference.default_model_path", "", width=360); r += 1
+        self._add_field(sec, r, "Default Model Meta Path", "inference.default_model_meta_path", "", width=360); r += 1
+        ctk.CTkLabel(
+            sec, text="Default model dipakai hanya bila template aktif tidak punya vision.model_path.",
+            font=("Segoe UI", 8), text_color=TEXT_SECONDARY,
+        ).grid(row=r, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 8)); r += 1
 
     # ── Diagnostics section ──────────────────────────────────────────
 
@@ -268,21 +278,20 @@ class MachineSettingsTab:
         ).pack(side="left", padx=(0, 8))
 
         ctk.CTkButton(
-            sec, text="Reload from DB", width=140,
+            sec, text="Reload", width=140,
             fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=TEXT_ON_ACCENT,
             command=self._load_settings,
         ).pack(side="left", padx=(0, 8))
 
         ctk.CTkButton(
-            sec, text="Re-seed from .env", width=140,
+            sec, text="Restart Backend", width=140,
             fg_color=WARNING, hover_color=WARNING_HOVER, text_color="#000000",
-            command=self._reseed_from_env,
+            command=self.admin.request_backend_restart,
         ).pack(side="left", padx=(0, 8))
 
-        # Seed status
-        self._seed_status_var = tk.StringVar(value="")
+        self._status_var = tk.StringVar(value="")
         ctk.CTkLabel(
-            sec, textvariable=self._seed_status_var, font=("Segoe UI", 9), text_color=TEXT_SECONDARY,
+            sec, textvariable=self._status_var, font=("Segoe UI", 9), text_color=TEXT_SECONDARY,
         ).pack(side="left", padx=(12, 0))
 
     # ── Data loading / saving ─────────────────────────────────────────
@@ -292,12 +301,17 @@ class MachineSettingsTab:
         try:
             self._settings = self.admin.api.get_machine_settings()
             self._populate_fields(self._settings)
-            seeded = self._settings.get("seeded_from_env", False)
-            self._seed_status_var.set(
-                f"{'Seeded from env' if seeded else 'User-edited'} | v{self._settings.get('version', 1)}"
-            )
+            self._set_status(self._settings)
         except Exception as exc:
             messagebox.showerror("Error", f"Failed to load settings: {exc}")
+
+    def _set_status(self, data: dict, *, saved: bool = False) -> None:
+        text = "Tersimpan. " if saved else ""
+        if data.get("restart_required"):
+            text += "Connection/Inference berubah — restart backend agar berlaku."
+        else:
+            text += "Semua setting aktif."
+        self._status_var.set(text)
 
     def _populate_fields(self, data: dict, prefix: str = "") -> None:
         """Recursively populate field vars from nested dict."""
@@ -313,13 +327,7 @@ class MachineSettingsTab:
                     var.set(str(value) if value is not None else "")
 
     def _collect_fields(self) -> dict:
-        """Collect field values into nested dict matching API schema.
-
-        Since the UI shows a single I/O section but the backend model
-        stores separate sticker / counter sections, we duplicate the
-        shared I/O values into both sections so both flow strategies
-        (StickerFlow, CounterFlow) receive the same addresses.
-        """
+        """Collect field values into a nested dict matching the API schema."""
         result: dict = {}
         for key, var in self._field_vars.items():
             parts = key.split(".")
@@ -337,25 +345,6 @@ class MachineSettingsTab:
                         d[parts[-1]] = float(val)
                     except (ValueError, TypeError):
                         d[parts[-1]] = str(val)
-
-        # Mirror shared I/O values from sticker → counter so CounterFlow
-        # also sees the same coil addresses and timing.
-        _io_fields = (
-            "relay_clamp_address", "relay_ok_light_buzzer_address",
-            "relay_enji_buzzer_address", "relay_spare_address",
-            "input_release_address", "input_template_address",
-            "input_clamp_engaged_address",
-            "clamp_feedback_enabled", "clamp_feedback_timeout_ms",
-            "clamp_feedback_fallback_delay_ms",
-            "accept_pulse_ms", "clamp_hold_ms",
-            "min_reclamp_interval_ms", "release_input_debounce_ms",
-        )
-        sticker_section = result.get("sticker", {})
-        counter_section = result.setdefault("counter", {})
-        for _f in _io_fields:
-            if _f in sticker_section:
-                counter_section[_f] = sticker_section[_f]
-
         return result
 
     def _save_settings(self) -> None:
@@ -363,26 +352,19 @@ class MachineSettingsTab:
         payload = self._collect_fields()
         try:
             self._settings = self.admin.api.update_machine_settings(payload)
-            self._seed_status_var.set("Saved (user-edited)")
-            messagebox.showinfo("Success", "Machine settings saved.")
+            self._set_status(self._settings, saved=True)
         except Exception as exc:
             messagebox.showerror("Error", f"Save failed: {exc}")
-
-    def _reseed_from_env(self) -> None:
-        """Re-seed settings from env vars (with confirmation)."""
-        if not messagebox.askyesno(
-            "Confirm Re-seed",
-            "This will overwrite current settings with values from .env file.\n\nContinue?",
-        ):
             return
-        try:
-            data = self.admin.api.seed_machine_settings(force=True)
-            self._settings = data.get("settings", {})
-            self._populate_fields(self._settings)
-            self._seed_status_var.set("Re-seeded from env")
-            messagebox.showinfo("Success", "Settings re-seeded from .env")
-        except Exception as exc:
-            messagebox.showerror("Error", f"Re-seed failed: {exc}")
+        if not self._settings.get("restart_required"):
+            messagebox.showinfo("Machine Settings", "Machine settings saved.")
+            return
+        if messagebox.askyesno(
+            "Machine Settings",
+            "Tersimpan. Section Connection / Inference berubah dan baru berlaku setelah restart backend.\n\n"
+            "Restart sekarang? (aplikasi ditutup dan dijalankan ulang otomatis)",
+        ):
+            self.admin.request_backend_restart()
 
     # ── Diagnostics ───────────────────────────────────────────────────
 

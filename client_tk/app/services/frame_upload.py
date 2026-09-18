@@ -26,11 +26,6 @@ class FrameUploadService:
         self._last_client_timings: dict = {}
         self._timings_lock = threading.Lock()
 
-    @property
-    def last_client_timings(self) -> dict:
-        with self._timings_lock:
-            return dict(self._last_client_timings)
-
     def start(
         self,
         *,

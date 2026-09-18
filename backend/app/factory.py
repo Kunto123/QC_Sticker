@@ -7,7 +7,6 @@ from pathlib import Path
 from flask import Flask, jsonify
 
 from backend.app.api.auth_routes import auth_blueprint
-from backend.app.api.calibration_routes import calibration_blueprint
 from backend.app.api.dashboard_routes import dashboard_blueprint
 from backend.app.api.deployment_routes import deployment_blueprint
 from backend.app.api.inspection_routes import inspection_blueprint
@@ -44,7 +43,6 @@ def create_app() -> Flask:
     app.register_blueprint(deployment_blueprint)
     app.register_blueprint(inspection_blueprint)
     app.register_blueprint(dashboard_blueprint)
-    app.register_blueprint(calibration_blueprint)
     app.register_blueprint(workstation_blueprint)
     app.register_blueprint(machine_settings_blueprint)
 
@@ -80,14 +78,6 @@ def create_app() -> Flask:
             "path": model_path or None,
             "exists": model_exists,
             "mode": app_config.sticker_inference_mode,
-        }
-
-        checks["ocr_runtime"] = {
-            "ok": True,
-            "mode": "disabled",
-            "engine": "disabled",
-            "required": False,
-            "note": "OCR removed",
         }
 
         # Push worker
@@ -126,7 +116,7 @@ def create_app() -> Flask:
 
 
 def _register_worker_lifecycle(app: Flask) -> None:
-    """Start push worker and WebSocket streaming server on first request."""
+    """Start push worker and PLC worker on first request."""
     _started = [False]
 
     @app.before_request
@@ -148,16 +138,3 @@ def _register_worker_lifecycle(app: Flask) -> None:
                 logger.info("[factory] plc worker started")
         except Exception as exc:  # noqa: BLE001
             logger.warning("[factory] plc worker failed to start: %s", exc)
-
-        try:
-            from backend.app.streaming.server import start as start_stream_server
-            config = app.config["QC_SUITE"]
-            if not getattr(config, "local_only", False):
-                stream_host = config.stream_host or config.host
-                start_stream_server(host=stream_host, port=config.stream_port)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[factory] streaming server failed to start: %s", exc)
-
-    @app.teardown_appcontext
-    def _stop_workers(_exc=None):
-        pass  # process-level teardown is handled by backend.app.core.shutdown

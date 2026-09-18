@@ -198,24 +198,9 @@ class CameraCaptureService:
                 return self._last_frame_before_disconnect.copy()
             return None
 
-    def attempt_reconnect(self) -> bool:
-        """Force an immediate reconnect attempt. Returns True if successful."""
-        if self._capture is not None:
-            try:
-                self._capture.release()
-            except Exception:
-                pass
-            self._capture = None
-        self._reconnecting = False
-        return False
-
     @property
     def actual_settings(self) -> dict[str, float]:
         return dict(self._actual_settings)
-
-    @property
-    def is_running(self) -> bool:
-        return bool(self._running and self._capture is not None)
 
     @property
     def is_active(self) -> bool:
