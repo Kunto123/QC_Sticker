@@ -31,7 +31,7 @@ from backend.app.services.sticker_inference import StickerInferenceService
 from backend.app.services.template_runtime import TemplateRuntimeService
 from backend.app.services.training import TrainingService
 from backend.app.workers.push_worker import PushWorker
-from backend.app.services.plc_adapter import build_plc_adapter_from_connection
+from backend.app.services.plc_adapter import build_plc_adapter
 from backend.app.workers.plc_worker import PlcWorker
 
 
@@ -77,44 +77,28 @@ template_runtime_service = TemplateRuntimeService(templates_repo, deployments_re
 sticker_inference_service = StickerInferenceService(app_config, models_repo, device_runtime)
 model_export_service = ModelExportService(models_repo, templates_repo, deployments_repo)
 
-# ── Machine settings: env seeds the DB once (fresh PC), after that the DB wins ──
-# Everything PLC/timing below is built from _machine_settings, not app_config.
-# app_config.plc_* / timing fields are only read by seed_from_env.
-machine_settings_repo = MachineSettingsRepository()
-machine_settings_repo.seed_from_env(app_config, force=False)
-_machine_settings = machine_settings_repo.load_settings()
-# Snapshot of the connection the adapter was built with. PUT /machine-settings
-# compares against this to tell the UI a restart is needed.
-boot_connection = _machine_settings.connection
-
-_plc_adapter = build_plc_adapter_from_connection(_machine_settings.connection)
+_plc_adapter = build_plc_adapter(app_config)
 plc_worker: PlcWorker | None = (
     PlcWorker(
         _plc_adapter,
-        accept_pulse_ms=_machine_settings.sticker.accept_pulse_ms,
+        accept_pulse_ms=app_config.plc_accept_pulse_ms,
         num_channels=4,
-        input_release_address=_machine_settings.sticker.input_release_address,
-        input_template_address=_machine_settings.sticker.input_template_address,
-        input_clamp_engaged_address=_machine_settings.sticker.input_clamp_engaged_address,
-        clamp_feedback_enabled=_machine_settings.sticker.clamp_feedback_enabled,
-        relay_clamp_address=_machine_settings.sticker.relay_clamp_address,
-        relay_ok_light_buzzer_address=_machine_settings.sticker.relay_ok_light_buzzer_address,
-        relay_enji_buzzer_address=_machine_settings.sticker.relay_enji_buzzer_address,
+        input_release_address=app_config.plc_input_release_address,
+        input_template_address=app_config.plc_input_template_address,
+        input_clamp_engaged_address=app_config.plc_input_clamp_engaged_address,
+        clamp_feedback_enabled=app_config.plc_clamp_feedback_enabled,
+        relay_clamp_address=app_config.plc_relay_clamp_address,
+        relay_ok_light_buzzer_address=app_config.plc_relay_ok_light_buzzer_address,
+        relay_enji_buzzer_address=app_config.plc_relay_enji_buzzer_address,
     )
-    if _machine_settings.connection.enabled
+    if app_config.plc_enabled
     else None
 )
 if plc_worker is not None:
-    # dry_run is set exactly once here — it describes the adapter above.
     plc_worker.configure_guards(
-        min_reclamp_interval_ms=_machine_settings.sticker.min_reclamp_interval_ms,
-        release_input_debounce_ms=_machine_settings.sticker.release_input_debounce_ms,
-        dry_run=_machine_settings.connection.dry_run,
-    )
-    plc_worker.apply_machine_settings(_machine_settings)
-    logging.getLogger("backend.container").info(
-        "[container] PLC worker strategy: %s (from MachineSettings DB)",
-        plc_worker.status().get("strategy", "none"),
+        min_reclamp_interval_ms=app_config.plc_min_reclamp_interval_ms,
+        release_input_debounce_ms=app_config.plc_release_input_debounce_ms,
+        dry_run=app_config.plc_dry_run,
     )
 
 inspection_session_service = InspectionSessionService(
@@ -126,22 +110,29 @@ inspection_session_service = InspectionSessionService(
     plc_worker=plc_worker,
     reject_log_repo=reject_log_repo,
 )
-inspection_session_service.apply_machine_settings(_machine_settings)
 training_service = TrainingService(training_repo, models_repo, device_runtime, app_config=app_config)
 workstation_registry_repo = WorkstationRegistryRepository()
 augment_repo = AugmentRepository()
+machine_settings_repo = MachineSettingsRepository()
+
+# Seed machine settings from env on first boot (idempotent)
+machine_settings_repo.seed_from_env(app_config, force=False)
+_machine_settings = machine_settings_repo.load_settings()
+
+# Set PLC worker strategy from MachineSettings
+if plc_worker is not None:
+    plc_worker.set_validator_mode("sticker", _machine_settings)
+    logging.getLogger("backend.container").info(
+        "[container] PLC worker strategy: %s (from MachineSettings DB)",
+        plc_worker.status().get("strategy", "none"),
+    )
 
 from backend.app.workers.augment_worker import AugmentWorker  # noqa: E402
 
 
 def _log_startup_config() -> None:
-    """Log semua config kritis satu blok saat service start.
-
-    Nilai PLC dan timing diambil dari MachineSettings (yang benar-benar dipakai),
-    bukan dari env — env hanya berperan saat seed pertama.
-    """
+    """Log semua config kritis satu blok saat service start."""
     _cfg = app_config
-    _ms = _machine_settings
     _logger = logging.getLogger("backend.startup")
     _lines = [
         "=== QC Suite Config ===",
@@ -151,31 +142,28 @@ def _log_startup_config() -> None:
         f"database_backend: {_cfg.database_backend}",
         f"sticker_inference_mode: {_cfg.sticker_inference_mode}",
         f"default_sticker_model_path: {_cfg.default_sticker_model_path or '(empty — auto-discover from template)'}",
+        f"commit_grace_ms: {_cfg.commit_grace_ms}",
+        f"accept_stable_ms: {_cfg.accept_stable_ms}",
+        f"accept_stable_frames: {_cfg.accept_stable_frames}",
+        f"hard_reject_stable_ms: {_cfg.hard_reject_stable_ms}",
+        f"hard_reject_stable_frames: {_cfg.hard_reject_stable_frames}",
+        f"part_ready_settle_ms_default: {_cfg.part_ready_settle_ms_default}",
+        f"part_ready_release_ms_default: {_cfg.part_ready_release_ms_default}",
+        f"reject_timeout_ms: {_cfg.reject_timeout_ms}",
         f"inspect_hard_reject_reasons: {_cfg.inspect_hard_reject_reasons}",
+        f"plc_enabled: {_cfg.plc_enabled}",
+        f"plc_dry_run: {_cfg.plc_dry_run}",
+        f"plc_transport: {_cfg.plc_transport}",
+        f"plc_min_reclamp_interval_ms: {_cfg.plc_min_reclamp_interval_ms}",
         f"inference_num_threads: {_cfg.inference_num_threads}",
         f"inference_timeout_s: {_cfg.inference_timeout_s}",
+        f"inference_cache_ttl_ms: {_cfg.inference_cache_ttl_ms}",
         f"inference_interval_ms: {_cfg.inference_interval_ms}",
+        f"session_idle_timeout_s: {_cfg.session_idle_timeout_s}",
         f"device_mode: {_cfg.device_mode}",
         f"cuda_device_id: {_cfg.cuda_device_id}",
         f"local_only: {_cfg.local_only}",
         f"access_logs_enabled: {_cfg.access_logs_enabled}",
-        f"--- machine_settings ({'seeded from env' if _ms.seeded_from_env else 'user-edited'} @ {_ms.seeded_at or '-'}) ---",
-        f"plc_enabled: {_ms.connection.enabled}",
-        f"plc_dry_run: {_ms.connection.dry_run}",
-        f"plc_transport: {_ms.connection.transport}",
-        f"plc_min_reclamp_interval_ms: {_ms.sticker.min_reclamp_interval_ms}",
-        f"plc_release_input_debounce_ms: {_ms.sticker.release_input_debounce_ms}",
-        f"plc_clamp_feedback_enabled: {_ms.sticker.clamp_feedback_enabled}",
-        f"commit_grace_ms: {_ms.timing.commit_grace_ms}",
-        f"accept_stable_ms: {_ms.timing.accept_stable_ms}",
-        f"accept_stable_frames: {_ms.timing.accept_stable_frames}",
-        f"hard_reject_stable_ms: {_ms.timing.hard_reject_stable_ms}",
-        f"hard_reject_stable_frames: {_ms.timing.hard_reject_stable_frames}",
-        f"part_ready_settle_ms_default: {_ms.timing.part_ready_settle_ms_default}",
-        f"part_ready_release_ms: {_ms.timing.part_ready_release_ms}",
-        f"reject_timeout_ms: {_ms.timing.reject_timeout_ms}",
-        f"inference_cache_ttl_ms: {_ms.timing.inference_cache_ttl_ms}",
-        f"session_idle_timeout_s: {_ms.timing.session_idle_timeout_s}",
         "=======================",
     ]
     for _line in _lines:

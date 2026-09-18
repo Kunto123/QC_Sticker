@@ -9,12 +9,11 @@ POST /machine-settings/plc/test-coil   → pulse a coil for wiring test (admin)
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict
 from typing import Any
 
 from flask import Blueprint, g, jsonify, request
 
-from backend.app.core.container import boot_connection, inspection_session_service, machine_settings_repo, plc_worker
+from backend.app.core.container import inspection_session_service, machine_settings_repo, plc_worker
 from backend.app.core.http import require_roles
 from backend.app.models.machine_settings import MachineSettings
 from shared.contracts.enums import UserRole
@@ -24,27 +23,14 @@ logger = logging.getLogger(__name__)
 machine_settings_blueprint = Blueprint("machine_settings", __name__, url_prefix="/machine-settings")
 
 
-def _restart_required(settings: MachineSettings) -> bool:
-    """True when the persisted connection differs from the one the adapter was
-    built with at boot. Connection cannot be rebuilt live (the worker thread owns
-    the adapter and routes hold plc_worker as an import-time global)."""
-    return asdict(settings.connection) != asdict(boot_connection)
-
-
-def _settings_response(settings: MachineSettings) -> dict[str, Any]:
-    payload = settings.to_dict()
-    payload["restart_required"] = _restart_required(settings)
-    return payload
-
-
 # ── CRUD ────────────────────────────────────────────────────────────
 
 @machine_settings_blueprint.get("")
 @require_roles(UserRole.ADMIN)
 def get_machine_settings():
-    """Return current machine settings (+ restart_required flag)."""
+    """Return current machine settings."""
     settings = machine_settings_repo.load_settings()
-    return jsonify(_settings_response(settings))
+    return jsonify(settings.to_dict())
 
 
 @machine_settings_blueprint.put("")
@@ -62,31 +48,28 @@ def update_machine_settings():
     except (TypeError, ValueError, KeyError) as exc:
         return jsonify({"error": f"Invalid settings: {exc}"}), 400
 
-    # Live-apply what can change at runtime: strategy, I/O mirror, guards
-    # (worker) and timing + clamp-feedback gate (session service). The same
-    # parsed object is persisted and applied so the two never diverge.
-    # connection.* is NOT applied here — see _restart_required.
+    # If PLC worker is running, update its strategy with new settings
     if plc_worker is not None:
         try:
-            plc_worker.apply_machine_settings(new_settings)
-            logger.info("[machine-settings] PLC worker strategy/guards refreshed")
+            plc_worker.set_validator_mode("sticker", new_settings)
+            logger.info("[machine-settings] PLC worker strategy refreshed")
+            # Also update PLC worker guards from new settings
+            plc_worker.configure_guards(
+                min_reclamp_interval_ms=new_settings.sticker.min_reclamp_interval_ms,
+                release_input_debounce_ms=new_settings.sticker.release_input_debounce_ms,
+            )
         except Exception as exc:
-            logger.warning("[machine-settings] failed to refresh PLC worker: %s", exc)
+            logger.warning("[machine-settings] failed to refresh PLC worker strategy: %s", exc)
 
+    # Propagate timing settings to inspection session service (runtime update)
     if inspection_session_service is not None:
         try:
-            inspection_session_service.apply_machine_settings(new_settings)
+            inspection_session_service.update_timing_settings(payload)
             logger.info("[machine-settings] timing settings pushed to inspection session service")
         except Exception as exc:
             logger.warning("[machine-settings] failed to push timing settings: %s", exc)
 
-    response = _settings_response(new_settings)
-    if response["restart_required"]:
-        logger.warning(
-            "[machine-settings] connection changed by %s — takes effect after backend restart",
-            g.current_user.username,
-        )
-    return jsonify(response)
+    return jsonify(new_settings.to_dict())
 
 
 # ── Seed ────────────────────────────────────────────────────────────
@@ -99,21 +82,9 @@ def seed_machine_settings():
     force = str(request.args.get("force") or "").lower() in ("1", "true", "yes")
     seeded = machine_settings_repo.seed_from_env(app_config, force=force)
     settings = machine_settings_repo.load_settings()
-    if seeded:
-        # Re-seed is a write like PUT: live-apply the runtime-changeable parts.
-        if plc_worker is not None:
-            try:
-                plc_worker.apply_machine_settings(settings)
-            except Exception as exc:
-                logger.warning("[machine-settings] failed to refresh PLC worker after seed: %s", exc)
-        if inspection_session_service is not None:
-            try:
-                inspection_session_service.apply_machine_settings(settings)
-            except Exception as exc:
-                logger.warning("[machine-settings] failed to push timing after seed: %s", exc)
     return jsonify({
         "seeded": seeded,
-        "settings": _settings_response(settings),
+        "settings": settings.to_dict(),
         "note": "Seeded from env vars" if seeded else "DB already exists, skipped (use ?force=1 to overwrite)",
     })
 

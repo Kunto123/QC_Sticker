@@ -295,27 +295,6 @@ class InspectionSessionService:
             len(timing),
         )
 
-    def apply_machine_settings(self, settings) -> None:
-        """Apply the parts of MachineSettings this service owns: the timing
-        section and the clamp-feedback gate parameters from the sticker section.
-
-        Called from container at boot (so the DB wins over env after the first
-        seed) and from PUT /machine-settings. The worker's own clamp_feedback
-        mirror is updated separately via PlcWorker.apply_machine_settings; both
-        must read the same section or the clamp gate and the poll loop disagree.
-        """
-        self.update_timing_settings(settings.to_dict())
-        sticker = settings.sticker
-        self._plc_clamp_feedback_enabled = bool(sticker.clamp_feedback_enabled)
-        self._plc_clamp_feedback_timeout_ms = max(0, int(sticker.clamp_feedback_timeout_ms))
-        self._plc_clamp_feedback_fallback_delay_ms = max(0, int(sticker.clamp_feedback_fallback_delay_ms))
-        logger.info(
-            "[inspection-session] clamp feedback from machine-settings: enabled=%s timeout=%dms fallback=%dms",
-            self._plc_clamp_feedback_enabled,
-            self._plc_clamp_feedback_timeout_ms,
-            self._plc_clamp_feedback_fallback_delay_ms,
-        )
-
     def _on_plc_state_change(self, old_state: str, new_state: str) -> None:
         """Callback dari PLC worker saat state berubah.
         Reset clamp gate saat PLC kembali ke IDLE (manual release).

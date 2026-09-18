@@ -446,84 +446,33 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
         return future.result(timeout=max(self._timeout, 5.0))
 
 
-def _build_adapter(
-    *,
-    dry_run: bool,
-    transport: str,
-    host: str,
-    port: int,
-    serial_port: str,
-    serial_baudrate: int,
-    serial_parity: str,
-    serial_bytesize: int,
-    serial_stopbits: int,
-    timeout_ms: int,
-    modbus_unit_id: int,
-) -> PlcAdapter:
-    """Pilih adapter dari field mentah. Dipakai oleh kedua factory publik."""
-    if dry_run:
+def build_plc_adapter(config) -> PlcAdapter:
+    """Factory: pilih adapter berdasarkan config."""
+    if config.plc_dry_run:
         return DryRunPlcAdapter()
 
-    transport = str(transport or "").strip().lower()
-    if transport == "fx":
+    if config.plc_transport == "fx":
         return FXComputerLinkPlcAdapter(
-            port=serial_port or "COM3",
-            baudrate=serial_baudrate,
-            timeout=timeout_ms / 1000.0,
+            port=config.plc_serial_port or "COM3",
+            baudrate=config.plc_serial_baudrate,
+            timeout=config.plc_timeout_ms / 1000.0,
         )
-    if transport == "rtu":
+    if config.plc_transport == "rtu":
         return ModbusRtuPlcAdapter(
-            port=serial_port or "COM7",
-            baudrate=serial_baudrate,
-            slave_id=modbus_unit_id,
-            timeout=timeout_ms / 1000.0,
-            parity=serial_parity,
-            bytesize=serial_bytesize,
-            stopbits=serial_stopbits,
+            port=config.plc_serial_port or "COM7",
+            baudrate=config.plc_serial_baudrate,
+            slave_id=config.plc_modbus_unit_id,
+            timeout=config.plc_timeout_ms / 1000.0,
+            parity=config.plc_serial_parity,
+            bytesize=config.plc_serial_bytesize,
+            stopbits=config.plc_serial_stopbits,
         )
-    if transport == "tcp":
+    elif config.plc_transport == "tcp":
         return ModbusTcpPlcAdapter(
-            host=host or "127.0.0.1",
-            port=port or 502,
-            slave_id=modbus_unit_id,
-            timeout=timeout_ms / 1000.0,
+            host=config.plc_host or "127.0.0.1",
+            port=config.plc_port or 502,
+            slave_id=config.plc_modbus_unit_id,
+            timeout=config.plc_timeout_ms / 1000.0,
         )
-    return DryRunPlcAdapter()
-
-
-def build_plc_adapter(config) -> PlcAdapter:
-    """Factory: pilih adapter berdasarkan AppConfig (env). Dipakai untuk seed/fallback."""
-    return _build_adapter(
-        dry_run=bool(config.plc_dry_run),
-        transport=config.plc_transport,
-        host=config.plc_host,
-        port=config.plc_port,
-        serial_port=config.plc_serial_port,
-        serial_baudrate=config.plc_serial_baudrate,
-        serial_parity=config.plc_serial_parity,
-        serial_bytesize=config.plc_serial_bytesize,
-        serial_stopbits=config.plc_serial_stopbits,
-        timeout_ms=config.plc_timeout_ms,
-        modbus_unit_id=config.plc_modbus_unit_id,
-    )
-
-
-def build_plc_adapter_from_connection(conn) -> PlcAdapter:
-    """Factory: pilih adapter berdasarkan MachineSettings.connection (DB).
-
-    Ini jalur boot normal — env hanya dipakai untuk seed pertama kali
-    (lihat MachineSettingsRepository.seed_from_env).
-    """
-    return _build_adapter(
-        dry_run=bool(conn.dry_run),
-        transport=conn.transport,
-        host=conn.host,
-        port=conn.port,
-        serial_port=conn.serial_port,
-        serial_baudrate=conn.serial_baudrate,
-        serial_parity=conn.serial_parity,
-        serial_bytesize=conn.serial_bytesize,
-        serial_stopbits=conn.serial_stopbits,
-        timeout_ms=conn.timeout_ms,
-        modbus_unit_id=conn.modbus_unit_id,
-    )
+    else:
+        return DryRunPlcAdapter()
