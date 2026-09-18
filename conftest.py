@@ -12,9 +12,9 @@ Goals:
   present in the test environment.
 
 IMPORTANT: os.environ mutations here run at conftest import, which pytest loads
-BEFORE collecting/importing test modules. test_api_smoke.py sets a few env vars
-at its own module top; we only set defaults with setdefault so we never clobber
-an explicit value a developer/CI exported.
+BEFORE collecting/importing test modules. The model-path seed uses setdefault so an
+explicit developer/CI value wins; the data root is always forced to a temp dir
+(tests must never touch a real ``data/``).
 """
 from __future__ import annotations
 
@@ -49,6 +49,12 @@ def _seed_default_sticker_model_env() -> None:
 
 
 _seed_default_sticker_model_env()
+
+# Isolated data root + test machine_settings.json BEFORE any test module imports
+# backend.app.* (config resolves DATA_ROOT at import). See backend/tests/_test_env.py.
+from backend.tests._test_env import ensure_test_data_root  # noqa: E402
+
+ensure_test_data_root()
 
 
 def pytest_configure(config) -> None:

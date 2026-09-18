@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import atexit
 import base64
 import json
-import os
-import shutil
 import time
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from uuid import uuid4
@@ -17,27 +13,14 @@ import numpy as np
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TEST_DATA_ROOT = Path(tempfile.mkdtemp(prefix="qc-suite-tests-"))
-atexit.register(lambda: shutil.rmtree(TEST_DATA_ROOT, ignore_errors=True))
-os.environ["QC_SUITE_DATA_ROOT"] = str(TEST_DATA_ROOT)
-# Runtime settings come from machine_settings.json (not env): write the test
-# machine's settings before the container imports it.
-(TEST_DATA_ROOT / "json_store").mkdir(parents=True, exist_ok=True)
-(TEST_DATA_ROOT / "json_store" / "machine_settings.json").write_text(
-    json.dumps({
-        "version": 2,
-        "connection": {"enabled": False, "dry_run": True},
-        "inference": {
-            "mode": "classic",
-            "default_model_path": os.environ.get("QC_SUITE_DEFAULT_STICKER_MODEL_PATH", ""),
-            "default_model_meta_path": os.environ.get("QC_SUITE_DEFAULT_STICKER_MODEL_META_PATH", ""),
-        },
-    }),
-    encoding="utf-8",
-)
-
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# Runtime settings come from machine_settings.json (not env) inside an isolated data
+# root; conftest.py already did this under pytest, this makes `python -m unittest` work.
+from backend.tests._test_env import ensure_test_data_root  # noqa: E402
+
+TEST_DATA_ROOT = ensure_test_data_root()
 
 from backend.app.factory import create_app
 

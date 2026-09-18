@@ -399,7 +399,7 @@ Suite after: **243 passed, 2 failed (pre-existing `test_00b`, `test_04d`), 9 ski
 User decision: training happens in other software. This app only **imports finished
 models**; the important case is an Ultralytics OpenVINO export folder zipped as-is,
 which must land in `data/models/<name>/` automatically. Suite after:
-**backend 170 passed, 2 failed (pre-existing `test_00b`, `test_04d`), 7 skipped** (incl. §9d);
+**backend 176 passed, 2 failed (pre-existing `test_00b`, `test_04d`), 7 skipped** (incl. §9d–§9f);
 client unit tests 9 passed. Production code is now ~21.5k lines (was 26.9k after §8).
 
 ### 9a. Removed
@@ -497,3 +497,47 @@ Ultralytics ONNX export (NCHW) runs. Not handled: exports made with `nms=True`
 (`[1, 300, 6]` xyxy+conf+cls) — different format, not a raw head.
 Verified on `ultralytics/assets/bus.jpg` with the user's model: 4 persons + bus at
 sane pixel boxes. Tests: `backend/tests/test_inference_backend_parse.py` (10).
+
+### 9e. Accept streak could never reach `accept_stable_frames ≥ 2` with a small `accept_stable_ms` (fixed)
+
+User set `accept_stable_frames=3`, `accept_stable_ms=100`; bbox stable, nothing ever
+committed. The generation-based accept counter (`inference_accept_count`) reset itself
+whenever more than `accept_stable_ms × 3` had passed since the *first* counted ACCEPT.
+With the template's `inference_fps=4` a new inference result arrives every ~250 ms, so
+three results never fit in a 300 ms window → the count cycled 1, 2, 1, 2 … The window
+was there to stop sparse ACCEPTs across long NOT_FOUND gaps from accumulating, but its
+size was derived from the wrong knob.
+
+Fix (`InspectionSessionService._update_accept_generation_count`, extracted from the
+inline policy block): count **consecutive** generations. Every frame reads the newest
+generation; a generation read by a frame that was not effective-accept (NOT_FOUND
+outside the holdover, low conf) is never counted, so a gap in counted generation
+numbers means the sticker was lost for longer than `accept_holdover_ms` → streak
+restarts at 1 and the policy stability clock (`policy_stable_frames`,
+`policy_stable_started_at`) restarts with it. No time window; slow inference can no
+longer starve the counter. Semantics of the three knobs are now literal:
+`accept_stable_frames` = N consecutive fresh ACCEPT results, `accept_stable_ms` =
+minimum time since the ACCEPT became stable, `accept_holdover_ms` = tolerated
+detection gap. Hard rejects still reset to 0; non-hard rejects still touch nothing.
+Tests: `backend/tests/test_accept_stability.py` (6).
+
+### 9f. INCIDENT: the suite ran against the real `data/` (fixed, data cleaned)
+
+`backend.app.core.config` resolves `DATA_ROOT` from `QC_SUITE_DATA_ROOT` at import.
+Only `test_api_smoke.py` (and `test_inspection_persistence.py`) set that env var, at
+their own module top — so whichever test module imported `backend.app.*` first decided
+the data root, and it happened to be `test_api_smoke.py` by alphabetical order. Adding
+`test_accept_stability.py` (sorts before it) made three full runs on 2026-09-18
+07:52–07:54Z read and write the developer's real `data/json_store`: 21 templates, 17
+models, 18 deployments, 13 users, 12 inspection rows and ~64 audit lines were added.
+Cleaned by removing exactly the rows created in those windows (backup of the polluted
+state: `data/json_store.bak-2026-09-18-testpollution/`; the user's own rows —
+template `TEST`, model `OpenVino`, users `admin`/`operator`, inspection row 1,
+`machine_settings.json`, `workstations.json` — were verified unchanged).
+
+Fix: `backend/tests/_test_env.py::ensure_test_data_root()` creates the temp root and
+the test `machine_settings.json` (PLC off, inference `classic`); `conftest.py` calls it
+at import, before any test module, and **always overrides** an inherited
+`QC_SUITE_DATA_ROOT`. `test_api_smoke.py` / `test_inspection_persistence.py` call the
+same idempotent helper so they still work under `python -m unittest`. Rule: a test
+must never set `QC_SUITE_DATA_ROOT` itself.

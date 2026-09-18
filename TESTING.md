@@ -27,7 +27,7 @@ come from a `machine_settings.json` in the test data root, never from env vars.
 ### Expected state
 
 As of 2026-09-18 (after Data/Training removal, HANDOFF.md §9):
-**170 passed, 2 failed, 7 skipped** (`pytest backend/tests`); client
+**176 passed, 2 failed, 7 skipped** (`pytest backend/tests`); client
 `test_async_bridge.py test_frame_upload.py test_app_restart.py`: 9 passed;
 `test_ui_smoke.py`: 12 passed / 8 failed (pre-existing drift, see `.claude/CLAUDE.md`).
 The two failures are pre-existing and documented in `.claude/CLAUDE.md`
@@ -43,6 +43,17 @@ deployment global-binding, `/plc/status` operator access, OCR removal. See
 If you later change what the code *does*, do not silence a failing test by editing it
 to pass — either restore the behavior (test goes green) or delete/rewrite the obsolete
 test **and** update `HANDOFF.md`.
+
+### Data root isolation (read before adding a test file)
+
+`conftest.py` → `backend/tests/_test_env.py::ensure_test_data_root()` gives the whole
+run a throwaway `QC_SUITE_DATA_ROOT` with a test `machine_settings.json` **before any
+test module is imported**, and overrides any inherited value. Never set
+`QC_SUITE_DATA_ROOT` in a test module: `config.py` fixes `DATA_ROOT` at first import,
+so the first importer wins — on 2026-09-18 a new file that sorted before
+`test_api_smoke.py` ran three suites against the developer's real `data/`
+(HANDOFF.md §9f). Modules that must also run under `python -m unittest` call the
+same helper (idempotent).
 
 ### Retired: datasets / annotation / augment / training (by design, 2026-09-18)
 

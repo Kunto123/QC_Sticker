@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-import atexit
-import os
-import shutil
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-TEST_DATA_ROOT = Path(tempfile.mkdtemp(prefix="qc-suite-persistence-tests-"))
-atexit.register(lambda: shutil.rmtree(TEST_DATA_ROOT, ignore_errors=True))
-os.environ["QC_SUITE_DATA_ROOT"] = str(TEST_DATA_ROOT)
-
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.tests._test_env import ensure_test_data_root  # noqa: E402
+
+TEST_DATA_ROOT = ensure_test_data_root()
 
 from backend.app.repositories.hybrid_inspection_results_repository import HybridInspectionResultsRepository
 from backend.app.repositories.inspection_results_repository import InspectionResultsRepository

@@ -625,6 +625,51 @@ class InspectionSessionService:
                 logger.error("[inspection] manual_release force_release failed: %s", exc)
         return self._session_payload(state)
 
+    def _update_accept_generation_count(
+        self,
+        state: SessionState,
+        *,
+        effective_is_accept: bool,
+        is_non_hard_reject: bool,
+        now_s: float,
+    ) -> bool:
+        """Count consecutive fresh ACCEPT inference results toward `accept_stable_frames`.
+
+        A generation is one completed inference. Every frame reads the newest
+        generation; a generation that was read by a frame which was *not* effective-
+        accept (NOT_FOUND / low-conf outside the holdover window) is never counted, so
+        a gap in the counted generation numbers means the sticker was lost for longer
+        than `accept_holdover_ms` → the streak restarts at 1. Consecutive generations
+        count regardless of how long inference takes (the old `accept_stable_ms × 3`
+        window silently made `accept_stable_frames ≥ 2` unreachable whenever
+        `accept_stable_ms` was smaller than the inference cadence — HANDOFF §9e).
+
+        Returns True when the streak was restarted (caller resets the policy clock).
+        """
+        if is_non_hard_reject:
+            # Non-hard reject is pure noise — do NOT touch any accept counters.
+            # The system must keep inferring; non-hard reject should not break an
+            # existing accept streak (holdover decides that, via skipped generations).
+            return False
+        if not effective_is_accept:
+            # Known hard-reject reason — reset counters; this breaks an accept streak.
+            state.inference_accept_count = 0
+            state.inference_accept_first_ts = 0.0
+            state.inference_last_counted_generation = -1
+            return False
+        generation = int(state.inference_result_generation)
+        last = int(state.inference_last_counted_generation)
+        if generation <= last:
+            return False  # same generation — don't double-count
+        streak_broken = last >= 0 and generation > last + 1 and state.inference_accept_first_ts > 0
+        state.inference_last_counted_generation = generation
+        if state.inference_accept_first_ts <= 0 or streak_broken:
+            state.inference_accept_count = 1
+            state.inference_accept_first_ts = now_s
+            return streak_broken
+        state.inference_accept_count += 1
+        return False
+
     def process_frame(
         self,
         session_id: str,
@@ -1231,39 +1276,16 @@ class InspectionSessionService:
         # inference result has actually changed (generation counter advanced).
         # This prevents the same cached result from being counted as multiple
         # stable frames on slow PCs where inference takes >500ms.
-        if _is_non_hard_reject:
-            # Non-hard reject is pure noise — do NOT touch any accept counters.
-            # The system must keep inferring; non-hard reject should not break an
-            # existing accept streak.
-            pass
-        elif _effective_is_accept:
-            if state.inference_result_generation > state.inference_last_counted_generation:
-                # New inference result since last counted — record it
-                state.inference_last_counted_generation = state.inference_result_generation
-                _now_s = time.time()
-                # Check if accept_window has expired since first accept reading.
-                # Skip window check when accept_stable_ms=0 (no time threshold).
-                if state.inference_accept_first_ts > 0 and self._accept_stable_ms > 0:
-                    _accept_window_ms = (_now_s - state.inference_accept_first_ts) * 1000.0
-                    if _accept_window_ms > self._accept_stable_ms * 3:
-                        # Window expired — reset and start fresh
-                        state.inference_accept_count = 1
-                        state.inference_accept_first_ts = _now_s
-                    else:
-                        state.inference_accept_count += 1
-                elif state.inference_accept_first_ts > 0:
-                    # accept_stable_ms=0: count every generation, no time window gate
-                    state.inference_accept_count += 1
-                else:
-                    state.inference_accept_count = 1
-                    state.inference_accept_first_ts = _now_s
-            # else: same generation — don't double-count
-        else:
-            # Known hard-reject reason (not non-hard, not accept) — reset counters
-            # This breaks an existing accept streak (hard reject blocks commit).
-            state.inference_accept_count = 0
-            state.inference_accept_first_ts = 0.0
-            state.inference_last_counted_generation = -1
+        if self._update_accept_generation_count(
+            state,
+            effective_is_accept=_effective_is_accept,
+            is_non_hard_reject=_is_non_hard_reject,
+            now_s=time.time(),
+        ):
+            # Streak restarted after a non-accept spell longer than the holdover:
+            # the policy stability clock restarts with it.
+            state.policy_stable_frames = 1
+            state.policy_stable_started_at = _now_policy
 
         # ── Cycle-level grace timer ──
         # Tracks the first moment ACCEPT was seen in this clamping cycle.
