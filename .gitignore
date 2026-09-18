@@ -16,7 +16,6 @@ ENV/
 .qc
 .hermes
 !.env.example
-data/models/*
 model-minipc/*
 backend/app/assets/part_ready_refs/*
 guidebook/
@@ -54,8 +53,7 @@ Thumbs.db
 *.temp
 
 # Runtime local data
-data/datasets/
-data/json_store/
+data/*
 docs
 
 # Large model binaries and generated training outputs
