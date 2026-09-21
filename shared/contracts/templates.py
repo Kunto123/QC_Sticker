@@ -39,6 +39,10 @@ class PartReadyConfig:
     method: str = "gap_template_match"
     gap_match_threshold: float = 0.85
     gap_ref_path: str | None = None
+    # Canny edge thresholds for gap_template_match. None (either) = auto-tuned
+    # from the ROI's own brightness median (legacy behaviour, unchanged default).
+    canny_low: int | None = None
+    canny_high: int | None = None
     min_match_ratio: float = 0.5
     stable_ms: int = 500
     release_ms: int = 300

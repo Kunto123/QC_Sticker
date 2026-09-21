@@ -1850,6 +1850,8 @@ class InspectionSessionService:
 
         ref_path = getattr(config, "gap_ref_path", None)
         threshold = float(getattr(config, "gap_match_threshold", 0.85) or 0.85)
+        canny_low = getattr(config, "canny_low", None)
+        canny_high = getattr(config, "canny_high", None)
 
         # Load reference patch (cached in state if available)
         cache_key = f"_gap_ref_{state.template.id}_{ref_path}"
@@ -1879,7 +1881,7 @@ class InspectionSessionService:
         _fh, _fw = frame.shape[:2]
         roi = {"x": 0, "y": 0, "w": _fw, "h": _fh}
 
-        result = match_gap(frame, roi, ref_patch, threshold)
+        result = match_gap(frame, roi, ref_patch, threshold, canny_low=canny_low, canny_high=canny_high)
         score = result["score"]
         ready = result["match"]
 

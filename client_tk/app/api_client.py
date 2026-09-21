@@ -197,13 +197,23 @@ class ApiClient:
     def create_session(self, payload: dict) -> dict:
         return self._post("/inspection/sessions/start", payload)
 
-    def capture_part_ready_ref(self, template_id: int, frame_b64: str, roi: dict) -> dict:
+    def capture_part_ready_ref(
+        self, template_id: int, frame_b64: str, roi: dict,
+        canny_low: int | None = None, canny_high: int | None = None,
+    ) -> dict:
         return self._post(
             f"/templates/{template_id}/part-ready-ref/capture",
-            {"frame_b64": frame_b64, "roi": roi},
+            {"frame_b64": frame_b64, "roi": roi, "canny_low": canny_low, "canny_high": canny_high},
         )
 
-    def upload_part_ready_ref(self, template_id: int, file_path: str) -> dict:
+    def get_part_ready_ref_preview(self, template_id: int) -> dict:
+        """Fetch the currently saved reference edge-map (base64 PNG), if any."""
+        return self._get(f"/templates/{template_id}/part-ready-ref")
+
+    def upload_part_ready_ref(
+        self, template_id: int, file_path: str,
+        canny_low: int | None = None, canny_high: int | None = None,
+    ) -> dict:
         """Upload reference patch image."""
         import mimetypes
         from pathlib import Path
@@ -216,12 +226,17 @@ class ApiClient:
                 import base64
                 return self._post(
                     f"/templates/{template_id}/part-ready-ref/upload",
-                    {"file_b64": base64.b64encode(file_bytes).decode("ascii")},
+                    {
+                        "file_b64": base64.b64encode(file_bytes).decode("ascii"),
+                        "canny_low": canny_low,
+                        "canny_high": canny_high,
+                    },
                 )
             response = self.session.request(
                 method="POST",
                 url=f"{self.base_url}/templates/{template_id}/part-ready-ref/upload",
                 files={"file": (path.name, fh, content_type)},
+                data={"canny_low": canny_low, "canny_high": canny_high},
                 headers=self._headers(json_content_type=False),
                 timeout=30,
             )

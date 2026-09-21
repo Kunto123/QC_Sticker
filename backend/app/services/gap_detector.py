@@ -22,14 +22,22 @@ PART_READY_REF_DIR = "backend/app/assets/part_ready_refs"
 
 _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 
-def _auto_canny(gray: np.ndarray, sigma: float = 0.5) -> np.ndarray:
-    """Auto-tune Canny thresholds from image median — robust terhadap perubahan cahaya."""
+def _auto_canny(
+    gray: np.ndarray,
+    sigma: float = 0.5,
+    low: int | None = None,
+    high: int | None = None,
+) -> np.ndarray:
+    """Canny edge map. Auto-tunes thresholds from the image median unless both
+    `low`/`high` are given explicitly (per-template manual override)."""
     gray = _clahe.apply(gray)   # normalkan brightness lokal sebelum hitung threshold
-    median = float(np.median(gray))
-    low = int(max(0, (1.0 - sigma) * median))
-    high = int(min(255, (1.0 + sigma) * median))
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    return cv2.Canny(blurred, low, high)
+    if low is not None and high is not None:
+        return cv2.Canny(blurred, int(low), int(high))
+    median = float(np.median(gray))
+    auto_low = int(max(0, (1.0 - sigma) * median))
+    auto_high = int(min(255, (1.0 + sigma) * median))
+    return cv2.Canny(blurred, auto_low, auto_high)
 
 
 def get_ref_path(template_id: int) -> Path:
@@ -56,7 +64,13 @@ def load_ref_patch(ref_path: str | None, template_id: int | None = None) -> np.n
     return None
 
 
-def save_ref_patch(frame_bgr: np.ndarray, roi: dict, save_path: str) -> tuple[bool, str]:
+def save_ref_patch(
+    frame_bgr: np.ndarray,
+    roi: dict,
+    save_path: str,
+    canny_low: int | None = None,
+    canny_high: int | None = None,
+) -> tuple[bool, str]:
     """Crop ROI, apply Canny edge detection, save as grayscale PNG.
 
     Returns (True, "") on success, (False, reason) on failure.
@@ -75,7 +89,7 @@ def save_ref_patch(frame_bgr: np.ndarray, roi: dict, save_path: str) -> tuple[bo
         if roi_frame.size == 0:
             return False, f"ROI region empty after clipping (frame {fw}x{fh}, roi x={rx} y={ry} w={rw} h={rh})"
         gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
-        edge_map = _auto_canny(gray)
+        edge_map = _auto_canny(gray, low=canny_low, high=canny_high)
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(save_path, edge_map)
         return True, ""
@@ -85,7 +99,9 @@ def save_ref_patch(frame_bgr: np.ndarray, roi: dict, save_path: str) -> tuple[bo
 
 
 def match_gap(frame_bgr: np.ndarray, roi: dict, ref_patch: np.ndarray,
-              threshold: float = 0.85) -> dict[str, Any]:
+              threshold: float = 0.85,
+              canny_low: int | None = None,
+              canny_high: int | None = None) -> dict[str, Any]:
     """Run cv2.matchTemplate of ref_patch on the ROI region.
 
     Returns:
@@ -108,7 +124,7 @@ def match_gap(frame_bgr: np.ndarray, roi: dict, ref_patch: np.ndarray,
 
         # Konversi ke edge map (auto-tune Canny) untuk matching yang robust
         gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
-        roi_frame = _auto_canny(gray)
+        roi_frame = _auto_canny(gray, low=canny_low, high=canny_high)
 
         # Ref patch must fit inside ROI
         ph, pw = ref_patch.shape[:2]

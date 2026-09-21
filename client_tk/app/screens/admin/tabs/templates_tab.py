@@ -16,6 +16,8 @@ def _float_or_default(value, default):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
 from client_tk.app.theme import (
     ACCENT,
     ACCENT_HOVER,
@@ -137,7 +139,7 @@ class TemplatesTab:
         a._entry(wizard, 9, 0, "Expected Class", a.preset_expected_class_var, columnspan=3)
 
         a._entry(wizard, 11, 0, "Gap Threshold (0-1)", a.preset_gap_threshold_var, columnspan=2)
-        # Track gap threshold widgets for show/hide based on method
+        # Track gap threshold widgets for show/hide based on method (row 13 added below)
         a._gap_threshold_widgets = []
         for _r in (11,):
             try:
@@ -159,6 +161,20 @@ class TemplatesTab:
         )
         method_combo.grid(row=12, column=1, columnspan=2, sticky="w", padx=(0, 12), pady=5)
         a.preset_part_ready_method_var.trace_add("write", lambda *_: self._on_part_ready_method_changed(a))
+
+        # Canny edge thresholds (gap_template_match only) — between the method
+        # dropdown and the reference capture button. Empty = auto-tuned (legacy).
+        a.preset_canny_low_var = tk.StringVar(value="")
+        a.preset_canny_high_var = tk.StringVar(value="")
+        canny_row = ttk.Frame(wizard)
+        canny_row.grid(row=13, column=0, columnspan=4, sticky="ew", padx=(12, 12), pady=5)
+        ttk.Label(canny_row, text="Canny Lower").pack(side="left", padx=(0, 4))
+        ttk.Entry(canny_row, textvariable=a.preset_canny_low_var, width=6).pack(side="left", padx=(0, 12))
+        ttk.Label(canny_row, text="Canny Upper").pack(side="left", padx=(0, 4))
+        ttk.Entry(canny_row, textvariable=a.preset_canny_high_var, width=6).pack(side="left", padx=(0, 12))
+        ttk.Label(canny_row, text="(kosongkan = otomatis)", foreground="gray").pack(side="left")
+        a._gap_threshold_widgets.append(canny_row)
+
         # Mean-Std threshold fields (shown only when method=mean_std_threshold)
         a._entry(wizard, 14, 0, "MEAN_MAX", a.preset_mean_max_var, columnspan=2)
         a._entry(wizard, 15, 0, "STD_MAX", a.preset_std_max_var, columnspan=2)
@@ -172,12 +188,18 @@ class TemplatesTab:
         a.gap_ref_status_label = ttk.Label(wizard, text="Referensi: belum dikonfigurasi", foreground="gray")
         a.gap_ref_status_label.grid(row=20, column=0, columnspan=4, sticky="w", padx=12, pady=(0, 6))
 
+        # Persistent preview of the saved master (edge-map) image, below the
+        # capture/upload buttons.
+        a.gap_ref_preview_label = tk.Label(wizard, text="(belum ada foto master)", fg="gray")
+        a.gap_ref_preview_label.grid(row=21, column=0, columnspan=4, sticky="w", padx=12, pady=(0, 8))
+        a._gap_ref_preview_photo = None
+
         # Visual ROI picker
         self._build_roi_picker(a, wizard)
 
         # Action buttons
         btn_row = ttk.Frame(wizard)
-        btn_row.grid(row=25, column=0, columnspan=4, sticky="ew", padx=12, pady=(16, 6))
+        btn_row.grid(row=26, column=0, columnspan=4, sticky="ew", padx=12, pady=(16, 6))
         btn_row.columnconfigure(0, weight=1)
         btn_row.columnconfigure(0, weight=1)
 
@@ -204,9 +226,9 @@ class TemplatesTab:
             corner_radius=6,
         ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
-        # Part ready reference widgets (capture/upload ref, status label) — rows 19/20
+        # Part ready reference widgets (capture/upload ref, status label, preview) — rows 19-21
         a._part_ready_ref_widgets = []
-        for _r in (19, 20):
+        for _r in (19, 20, 21):
             try:
                 for w in wizard.grid_slaves(row=_r):
                     a._part_ready_ref_widgets.append(w)
@@ -241,7 +263,7 @@ class TemplatesTab:
     # ROI Picker
     def _build_roi_picker(self, a, wizard) -> None:
         roi_panel = ctk.CTkFrame(wizard, fg_color=PANEL_BG, corner_radius=8, border_width=1, border_color=BORDER)
-        roi_panel.grid(row=21, column=0, columnspan=4, sticky="ew", padx=12, pady=(12, 2))
+        roi_panel.grid(row=22, column=0, columnspan=4, sticky="ew", padx=12, pady=(12, 2))
         roi_panel.columnconfigure(0, weight=1)
         a._roi_picker_panel = roi_panel
 

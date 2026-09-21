@@ -772,6 +772,8 @@ class AdminScreen(ctk.CTkFrame):
         "preset_conf_threshold_var": "0.25",
         "preset_expected_class_var": "",
         "preset_gap_threshold_var": "0.85",
+        "preset_canny_low_var": "",
+        "preset_canny_high_var": "",
         "preset_part_ready_method_var": "gap_template_match",
         "preset_mean_max_var": "105.0",
         "preset_std_max_var": "35.0",
@@ -824,6 +826,7 @@ class AdminScreen(ctk.CTkFrame):
                     text="Referensi: belum dikonfigurasi", foreground="gray")
             except Exception:
                 pass
+        self._set_gap_ref_preview_image(None)
 
     def _assert_form_defaults(self) -> None:
         """Assert all preset_* variables are registered in FORM_DEFAULTS.
@@ -913,6 +916,8 @@ class AdminScreen(ctk.CTkFrame):
         part_ready = detail.get("part_ready") or {}
         self.preset_expected_class_var.set(str(sticker.get("expected_class") or ""))
         self.preset_gap_threshold_var.set(str(part_ready.get("gap_match_threshold", 0.85)))
+        self.preset_canny_low_var.set("" if part_ready.get("canny_low") is None else str(part_ready.get("canny_low")))
+        self.preset_canny_high_var.set("" if part_ready.get("canny_high") is None else str(part_ready.get("canny_high")))
         # Part ready method and mean-std thresholds
         _method = str(part_ready.get("method") or "").strip() or "gap_template_match"
         self.preset_part_ready_method_var.set(_method)
@@ -932,6 +937,7 @@ class AdminScreen(ctk.CTkFrame):
         else:
             self.gap_ref_status_label.configure(
                 text="Referensi: belum dikonfigurasi", foreground="gray")
+        self._refresh_gap_ref_preview()
         camera_cfg = detail.get("camera") or {}
         self.preset_camera_index_var.set(str(camera_cfg.get("camera_index", 0)))
         self._refresh_preset_action_button()
@@ -1251,6 +1257,67 @@ class AdminScreen(ctk.CTkFrame):
             pass
         return None
 
+    def _current_canny_bounds(self) -> tuple[int | None, int | None]:
+        """Parse the wizard's Canny lower/upper fields; empty = auto (None)."""
+        def _parse(var_name: str) -> int | None:
+            var = getattr(self, var_name, None)
+            text = str(var.get()).strip() if var is not None else ""
+            if not text:
+                return None
+            try:
+                return int(float(text))
+            except (TypeError, ValueError):
+                return None
+        return _parse("preset_canny_low_var"), _parse("preset_canny_high_var")
+
+    def _set_gap_ref_preview_image(self, preview_b64: str | None) -> None:
+        """Render the saved master edge-map as a persistent thumbnail below the capture button."""
+        label = getattr(self, "gap_ref_preview_label", None)
+        if label is None:
+            return
+        if not preview_b64:
+            try:
+                label.configure(image="", text="(belum ada foto master)")
+            except Exception:
+                pass
+            self._gap_ref_preview_photo = None
+            return
+        try:
+            import base64 as _b64
+            import numpy as np
+            import cv2
+            from PIL import Image, ImageTk
+
+            raw = _b64.b64decode(preview_b64)
+            arr = np.frombuffer(raw, np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                label.configure(image="", text="(preview tidak tersedia)")
+                self._gap_ref_preview_photo = None
+                return
+            max_w, max_h = 260, 160
+            h, w = img.shape[:2]
+            scale = min(max_w / max(w, 1), max_h / max(h, 1), 1.0)
+            if scale < 1.0:
+                img = cv2.resize(img, (int(w * scale), int(h * scale)))
+            photo = ImageTk.PhotoImage(Image.fromarray(img))
+            label.configure(image=photo, text="")
+            self._gap_ref_preview_photo = photo  # keep a reference, tkinter needs it
+        except Exception:
+            label.configure(image="", text="(preview tidak tersedia)")
+            self._gap_ref_preview_photo = None
+
+    def _refresh_gap_ref_preview(self) -> None:
+        """Fetch the currently saved master reference (if any) and show it inline."""
+        if not self.current_template_id:
+            self._set_gap_ref_preview_image(None)
+            return
+        try:
+            result = self.api.get_part_ready_ref_preview(self.current_template_id)
+            self._set_gap_ref_preview_image(result.get("preview_b64") if result.get("exists") else None)
+        except Exception:
+            self._set_gap_ref_preview_image(None)
+
     def _capture_part_ready_ref(self) -> None:
         """Capture reference gap patch from current camera frame."""
         if not self.current_template_id:
@@ -1278,57 +1345,17 @@ class AdminScreen(ctk.CTkFrame):
             }
             _, buf = cv2.imencode(".png", frame)
             frame_b64 = base64.b64encode(buf).decode("ascii")
-            result = self.api.capture_part_ready_ref(self.current_template_id, frame_b64, roi)
+            canny_low, canny_high = self._current_canny_bounds()
+            result = self.api.capture_part_ready_ref(
+                self.current_template_id, frame_b64, roi, canny_low=canny_low, canny_high=canny_high)
             if result.get("saved"):
                 self.gap_ref_status_label.configure(
                     text="Referensi: edge map ✓", foreground="green")
-                preview_b64 = result.get("preview_b64")
-                if preview_b64:
-                    self._show_edge_map_preview(preview_b64)
-                else:
-                    messagebox.showinfo("Reference", "Edge map referensi berhasil disimpan.")
+                self._set_gap_ref_preview_image(result.get("preview_b64"))
             else:
                 messagebox.showerror("Reference", result.get("error", "Gagal menyimpan referensi."))
         except Exception as exc:
             messagebox.showerror("Reference", f"Capture failed: {exc}")
-
-    def _show_edge_map_preview(self, preview_b64: str) -> None:
-        """Dialog preview edge map yang baru disimpan sebagai master."""
-        try:
-            import base64 as _b64
-            import numpy as np
-            import cv2
-            from PIL import Image, ImageTk
-
-            raw = _b64.b64decode(preview_b64)
-            arr = np.frombuffer(raw, np.uint8)
-            img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
-            if img is None:
-                messagebox.showinfo("Reference", "Edge map disimpan (preview tidak tersedia).")
-                return
-            max_w, max_h = 640, 400
-            h, w = img.shape[:2]
-            scale = min(max_w / max(w, 1), max_h / max(h, 1), 1.0)
-            if scale < 1.0:
-                img = cv2.resize(img, (int(w * scale), int(h * scale)))
-            pil_img = Image.fromarray(img)
-            photo = ImageTk.PhotoImage(pil_img)
-            dlg = tk.Toplevel(self)
-            dlg.title("Preview Edge Map Referensi")
-            dlg.resizable(False, False)
-            tk.Label(dlg, image=photo).pack(padx=10, pady=10)
-            tk.Label(
-                dlg,
-                text="Ini yang disimpan sebagai master.\n"
-                     "Pastikan tepi part & clamp terlihat jelas.",
-                justify="center",
-            ).pack(pady=(0, 6))
-            tk.Button(dlg, text="OK", width=10, command=dlg.destroy).pack(pady=(0, 10))
-            dlg._photo = photo
-            dlg.grab_set()
-            dlg.wait_window()
-        except Exception as exc:
-            messagebox.showinfo("Reference", f"Edge map disimpan. Preview error: {exc}")
 
     def _upload_part_ready_ref(self) -> None:
         """Upload reference patch image from file."""
@@ -1343,10 +1370,13 @@ class AdminScreen(ctk.CTkFrame):
         if not file_path:
             return
         try:
-            result = self.api.upload_part_ready_ref(self.current_template_id, file_path)
+            canny_low, canny_high = self._current_canny_bounds()
+            result = self.api.upload_part_ready_ref(
+                self.current_template_id, file_path, canny_low=canny_low, canny_high=canny_high)
             if result.get("saved"):
                 self.gap_ref_status_label.configure(
                     text="Referensi: edge map ✓", foreground="green")
+                self._set_gap_ref_preview_image(result.get("preview_b64"))
                 messagebox.showinfo("Reference", "Referensi edge map berhasil diupload.")
             else:
                 messagebox.showerror("Reference", result.get("error", "Gagal upload referensi."))
@@ -1402,6 +1432,8 @@ class AdminScreen(ctk.CTkFrame):
                 "method": self.preset_part_ready_method_var.get(),
                 "gap_match_threshold": _float_or_default(self.preset_gap_threshold_var.get(), 0.85),
                 "gap_ref_path": self._get_existing_gap_ref_path(),
+                "canny_low": self._current_canny_bounds()[0],
+                "canny_high": self._current_canny_bounds()[1],
                 "stable_ms": 500,
                 "release_ms": 300,
                 "mean_max": _float_or_default(self.preset_mean_max_var.get(), 105.0),

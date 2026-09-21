@@ -18,6 +18,23 @@ from shared.contracts.templates import validate_sticker_rule
 template_blueprint = Blueprint("templates", __name__, url_prefix="/templates")
 
 
+def _parse_canny_bound(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _encode_ref_preview(save_path: str) -> str | None:
+    try:
+        with open(save_path, "rb") as fh:
+            return base64.b64encode(fh.read()).decode("ascii")
+    except OSError:
+        return None
+
+
 @template_blueprint.get("")
 @require_auth
 def list_templates():
@@ -137,6 +154,8 @@ def capture_part_ready_ref(template_id: int):
     payload = request.get_json(force=True) or {}
     frame_b64 = str(payload.get("frame_b64") or "")
     roi = payload.get("roi") or {}
+    canny_low = _parse_canny_bound(payload.get("canny_low"))
+    canny_high = _parse_canny_bound(payload.get("canny_high"))
     if not frame_b64:
         return jsonify({"error": "frame_b64 required"}), 400
     try:
@@ -149,7 +168,7 @@ def capture_part_ready_ref(template_id: int):
         return jsonify({"error": f"Decode failed: {exc}"}), 400
 
     save_path = str(get_ref_path(template_id))
-    ok, err_msg = save_ref_patch(frame, roi, save_path)
+    ok, err_msg = save_ref_patch(frame, roi, save_path, canny_low=canny_low, canny_high=canny_high)
     if ok:
         # Update template config with ref_path — use update_current_version with full detail
         try:
@@ -158,11 +177,17 @@ def capture_part_ready_ref(template_id: int):
                 pr = dict(detail.get("part_ready") or {})
                 pr["gap_ref_path"] = save_path
                 pr["method"] = "gap_template_match"
+                pr["canny_low"] = canny_low
+                pr["canny_high"] = canny_high
                 detail["part_ready"] = pr
                 templates_repo.update_current_version(template_id, detail)
         except Exception:
             pass  # non-critical
-        return jsonify({"saved": True, "path": save_path}), 201
+        return jsonify({
+            "saved": True,
+            "path": save_path,
+            "preview_b64": _encode_ref_preview(save_path),
+        }), 201
     reason = err_msg or "check ROI and camera"
     return jsonify({"error": f"Failed to extract gap patch — {reason}"}), 400
 
@@ -172,6 +197,8 @@ def capture_part_ready_ref(template_id: int):
 def upload_part_ready_ref(template_id: int):
     """Upload reference patch image (user provides the patch directly)."""
     file_bytes = None
+    canny_low = _parse_canny_bound(request.args.get("canny_low") or request.form.get("canny_low"))
+    canny_high = _parse_canny_bound(request.args.get("canny_high") or request.form.get("canny_high"))
 
     # Try multipart file upload first
     if "file" in request.files:
@@ -183,6 +210,8 @@ def upload_part_ready_ref(template_id: int):
         # Fallback: accept base64 JSON from local mode client
         payload = request.get_json(silent=True) or {}
         file_b64 = str(payload.get("file_b64") or "")
+        canny_low = canny_low if canny_low is not None else _parse_canny_bound(payload.get("canny_low"))
+        canny_high = canny_high if canny_high is not None else _parse_canny_bound(payload.get("canny_high"))
         if file_b64:
             try:
                 file_bytes = base64.b64decode(file_b64)
@@ -201,7 +230,7 @@ def upload_part_ready_ref(template_id: int):
             return jsonify({"error": "Invalid image file"}), 400
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         from backend.app.services.gap_detector import _auto_canny
-        edge_map = _auto_canny(gray)
+        edge_map = _auto_canny(gray, low=canny_low, high=canny_high)
         cv2.imwrite(save_path, edge_map)
     except Exception as exc:
         return jsonify({"error": f"Save failed: {exc}"}), 400
@@ -213,12 +242,28 @@ def upload_part_ready_ref(template_id: int):
             pr = dict(detail.get("part_ready") or {})
             pr["gap_ref_path"] = save_path
             pr["method"] = "gap_template_match"
+            pr["canny_low"] = canny_low
+            pr["canny_high"] = canny_high
             detail["part_ready"] = pr
             templates_repo.update_current_version(template_id, detail)
     except Exception:
         pass  # non-critical
 
-    return jsonify({"saved": True, "path": save_path}), 201
+    return jsonify({
+        "saved": True,
+        "path": save_path,
+        "preview_b64": _encode_ref_preview(save_path),
+    }), 201
+
+
+@template_blueprint.get("/<int:template_id>/part-ready-ref")
+@require_roles(UserRole.ADMIN)
+def get_part_ready_ref(template_id: int):
+    """Return the currently saved reference edge-map (base64 PNG), if any."""
+    ref_path = get_ref_path(template_id)
+    if not ref_path.is_file():
+        return jsonify({"exists": False, "preview_b64": None}), 200
+    return jsonify({"exists": True, "preview_b64": _encode_ref_preview(str(ref_path))}), 200
 
 
 @template_blueprint.delete("/<int:template_id>/part-ready-ref")

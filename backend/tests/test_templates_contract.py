@@ -83,6 +83,21 @@ class TemplateParseTest(unittest.TestCase):
         p["part_ready"]["method"] = ""
         self.assertEqual(template_from_dict(p).part_ready.method, "gap_template_match")
 
+    def test_canny_bounds_default_to_none(self) -> None:
+        tpl = template_from_dict(_minimal_sticker_payload())
+        self.assertIsNone(tpl.part_ready.canny_low)
+        self.assertIsNone(tpl.part_ready.canny_high)
+
+    def test_canny_bounds_round_trip(self) -> None:
+        p = _minimal_sticker_payload()
+        p["part_ready"]["canny_low"] = 40
+        p["part_ready"]["canny_high"] = 120
+        tpl = template_from_dict(p)
+        self.assertEqual(tpl.part_ready.canny_low, 40)
+        self.assertEqual(tpl.part_ready.canny_high, 120)
+        self.assertEqual(tpl.to_dict()["part_ready"]["canny_low"], 40)
+        self.assertEqual(tpl.to_dict()["part_ready"]["canny_high"], 120)
+
 
 class RoundTripTest(unittest.TestCase):
     def test_sticker_roundtrip_is_idempotent(self) -> None:
