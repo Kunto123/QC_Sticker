@@ -35,6 +35,24 @@ def _encode_ref_preview(save_path: str) -> str | None:
         return None
 
 
+def _blank_reference_warning(save_path: str) -> str | None:
+    """Warn at calibration time if the saved edge map has zero variance
+    (no edges detected). cv2.matchTemplate's TM_CCOEFF_NORMED returns a
+    spurious 1.0 "perfect match" against ANY live frame when the reference
+    is constant — this reference would make gap_template_match always report
+    100% ready regardless of what the camera actually sees."""
+    edge_map = cv2.imread(save_path, cv2.IMREAD_GRAYSCALE)
+    if edge_map is None or edge_map.size == 0:
+        return None
+    if edge_map.min() == edge_map.max():
+        return (
+            "Referensi tidak punya tepi terdeteksi sama sekali (Canny kosong) — "
+            "part-ready akan SELALU dianggap 100% siap apa pun yang ada di kamera. "
+            "Turunkan Canny Lower/Upper atau perbaiki pencahayaan, lalu capture ulang."
+        )
+    return None
+
+
 @template_blueprint.get("")
 @require_auth
 def list_templates():
@@ -187,6 +205,7 @@ def capture_part_ready_ref(template_id: int):
             "saved": True,
             "path": save_path,
             "preview_b64": _encode_ref_preview(save_path),
+            "warning": _blank_reference_warning(save_path),
         }), 201
     reason = err_msg or "check ROI and camera"
     return jsonify({"error": f"Failed to extract gap patch — {reason}"}), 400
@@ -253,6 +272,7 @@ def upload_part_ready_ref(template_id: int):
         "saved": True,
         "path": save_path,
         "preview_b64": _encode_ref_preview(save_path),
+        "warning": _blank_reference_warning(save_path),
     }), 201
 
 

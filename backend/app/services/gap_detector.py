@@ -136,6 +136,18 @@ def match_gap(frame_bgr: np.ndarray, roi: dict, ref_patch: np.ndarray,
             ref_patch = cv2.resize(ref_patch, (new_w, new_h))
             ph, pw = ref_patch.shape[:2]
 
+        # Guard: TM_CCOEFF_NORMED divides by each patch's own variance. A
+        # constant (blank) reference or live edge map makes that variance
+        # exactly zero -> OpenCV's 0/0 resolves to a spurious 1.0 "perfect
+        # match" REGARDLESS of the other patch's content (verified: a blank
+        # reference scores 1.0 against any live image, blank or not). A
+        # reference with zero detected edges means Canny never fired during
+        # calibration and can never provide a meaningful comparison; a blank
+        # live capture (e.g. lens covered) can't confirm anything either —
+        # fail closed instead of trusting a degenerate correlation.
+        if ref_patch.min() == ref_patch.max() or roi_frame.min() == roi_frame.max():
+            return {"match": False, "score": 0.0, "location": (0, 0)}
+
         # Template matching
         result = cv2.matchTemplate(roi_frame, ref_patch, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)

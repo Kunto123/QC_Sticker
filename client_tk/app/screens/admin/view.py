@@ -1351,8 +1351,14 @@ class AdminScreen(ctk.CTkFrame):
             result = self.api.capture_part_ready_ref(
                 self.current_template_id, frame_b64, roi, canny_low=canny_low, canny_high=canny_high)
             if result.get("saved"):
-                self.gap_ref_status_label.configure(
-                    text="Referensi: edge map ✓", foreground="green")
+                warning = result.get("warning")
+                if warning:
+                    self.gap_ref_status_label.configure(
+                        text="Referensi: edge map kosong ⚠", foreground="orange")
+                    messagebox.showwarning("Reference", warning)
+                else:
+                    self.gap_ref_status_label.configure(
+                        text="Referensi: edge map ✓", foreground="green")
                 self._set_gap_ref_preview_image(result.get("preview_b64"))
             else:
                 messagebox.showerror("Reference", result.get("error", "Gagal menyimpan referensi."))
@@ -1376,10 +1382,16 @@ class AdminScreen(ctk.CTkFrame):
             result = self.api.upload_part_ready_ref(
                 self.current_template_id, file_path, canny_low=canny_low, canny_high=canny_high)
             if result.get("saved"):
-                self.gap_ref_status_label.configure(
-                    text="Referensi: edge map ✓", foreground="green")
+                warning = result.get("warning")
+                if warning:
+                    self.gap_ref_status_label.configure(
+                        text="Referensi: edge map kosong ⚠", foreground="orange")
+                    messagebox.showwarning("Reference", warning)
+                else:
+                    self.gap_ref_status_label.configure(
+                        text="Referensi: edge map ✓", foreground="green")
+                    messagebox.showinfo("Reference", "Referensi edge map berhasil diupload.")
                 self._set_gap_ref_preview_image(result.get("preview_b64"))
-                messagebox.showinfo("Reference", "Referensi edge map berhasil diupload.")
             else:
                 messagebox.showerror("Reference", result.get("error", "Gagal upload referensi."))
         except Exception as exc:

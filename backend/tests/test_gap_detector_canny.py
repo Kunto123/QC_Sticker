@@ -65,6 +65,48 @@ class GapMatchCannyThreadingTest(unittest.TestCase):
             os.unlink(path)
 
 
+class BlankReferenceDegenerateMatchTest(unittest.TestCase):
+    """cv2.matchTemplate(TM_CCOEFF_NORMED) divides by each patch's variance —
+    a constant (blank/no-edges) reference makes that 0/0, and OpenCV resolves
+    it to a spurious 1.0 "perfect match" no matter what the live frame shows.
+    A reference with canny thresholds too strict for the calibration lighting
+    saves a blank edge map, and the gate then always reports 100% ready —
+    covered lens included. match_gap must fail closed on a blank patch
+    instead of trusting that degenerate score."""
+
+    def test_blank_reference_never_matches_even_a_textured_live_frame(self) -> None:
+        ref_patch = np.zeros((60, 60), dtype=np.uint8)  # no edges at all
+        live = np.zeros((200, 200, 3), dtype=np.uint8)
+        cv2.rectangle(live, (85, 85), (115, 115), (255, 255, 255), -1)  # plenty of texture
+        roi = {"x": 70, "y": 70, "w": 60, "h": 60}
+        result = match_gap(live, roi, ref_patch, threshold=0.5, canny_low=30, canny_high=90)
+        self.assertFalse(result["match"], result)
+        self.assertEqual(result["score"], 0.0)
+
+    def test_blank_reference_against_blank_live_frame_does_not_score_1(self) -> None:
+        ref_patch = np.zeros((60, 60), dtype=np.uint8)
+        live = np.zeros((200, 200, 3), dtype=np.uint8)  # camera covered / lens cap
+        roi = {"x": 70, "y": 70, "w": 60, "h": 60}
+        result = match_gap(live, roi, ref_patch, threshold=0.5, canny_low=30, canny_high=90)
+        self.assertFalse(result["match"], result)
+        self.assertEqual(result["score"], 0.0)
+
+    def test_real_reference_still_matches_normally(self) -> None:
+        """Guard must not affect a legitimate (non-blank) reference/live pair."""
+        frame = cv2.cvtColor(_checkerboard(128), cv2.COLOR_GRAY2BGR)
+        roi = {"x": 0, "y": 0, "w": 128, "h": 128}
+        fd, path = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        try:
+            ok, err = save_ref_patch(frame, roi, path, canny_low=30, canny_high=90)
+            self.assertTrue(ok, err)
+            ref_patch = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+            result = match_gap(frame, roi, ref_patch, threshold=0.5, canny_low=30, canny_high=90)
+            self.assertTrue(result["match"], result)
+        finally:
+            os.unlink(path)
+
+
 class ExpandRoiForGapSearchTest(unittest.TestCase):
     """_expand_roi_for_gap_search — pure geometry, no session/mocks needed."""
 
