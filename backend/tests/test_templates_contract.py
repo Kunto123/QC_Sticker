@@ -98,6 +98,17 @@ class TemplateParseTest(unittest.TestCase):
         self.assertEqual(tpl.to_dict()["part_ready"]["canny_low"], 40)
         self.assertEqual(tpl.to_dict()["part_ready"]["canny_high"], 120)
 
+    def test_gap_search_margin_defaults_to_zero(self) -> None:
+        tpl = template_from_dict(_minimal_sticker_payload())
+        self.assertEqual(tpl.part_ready.gap_search_margin, 0.0)
+
+    def test_gap_search_margin_round_trip(self) -> None:
+        p = _minimal_sticker_payload()
+        p["part_ready"]["gap_search_margin"] = 0.15
+        tpl = template_from_dict(p)
+        self.assertEqual(tpl.part_ready.gap_search_margin, 0.15)
+        self.assertEqual(tpl.to_dict()["part_ready"]["gap_search_margin"], 0.15)
+
 
 class RoundTripTest(unittest.TestCase):
     def test_sticker_roundtrip_is_idempotent(self) -> None:

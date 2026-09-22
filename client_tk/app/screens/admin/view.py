@@ -774,6 +774,7 @@ class AdminScreen(ctk.CTkFrame):
         "preset_gap_threshold_var": "0.85",
         "preset_canny_low_var": "",
         "preset_canny_high_var": "",
+        "preset_gap_search_margin_var": "0.0",
         "preset_part_ready_method_var": "gap_template_match",
         "preset_mean_max_var": "105.0",
         "preset_std_max_var": "35.0",
@@ -918,6 +919,7 @@ class AdminScreen(ctk.CTkFrame):
         self.preset_gap_threshold_var.set(str(part_ready.get("gap_match_threshold", 0.85)))
         self.preset_canny_low_var.set("" if part_ready.get("canny_low") is None else str(part_ready.get("canny_low")))
         self.preset_canny_high_var.set("" if part_ready.get("canny_high") is None else str(part_ready.get("canny_high")))
+        self.preset_gap_search_margin_var.set(str(part_ready.get("gap_search_margin", 0.0)))
         # Part ready method and mean-std thresholds
         _method = str(part_ready.get("method") or "").strip() or "gap_template_match"
         self.preset_part_ready_method_var.set(_method)
@@ -1434,6 +1436,7 @@ class AdminScreen(ctk.CTkFrame):
                 "gap_ref_path": self._get_existing_gap_ref_path(),
                 "canny_low": self._current_canny_bounds()[0],
                 "canny_high": self._current_canny_bounds()[1],
+                "gap_search_margin": _float_or_default(self.preset_gap_search_margin_var.get(), 0.0),
                 "stable_ms": 500,
                 "release_ms": 300,
                 "mean_max": _float_or_default(self.preset_mean_max_var.get(), 105.0),

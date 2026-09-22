@@ -175,6 +175,17 @@ class TemplatesTab:
         ttk.Label(canny_row, text="(kosongkan = otomatis)", foreground="gray").pack(side="left")
         a._gap_threshold_widgets.append(canny_row)
 
+        # Search margin: how far (fraction of ROI's own w/h) the runtime search
+        # area grows around part_ready_roi so a part that shifts/tilts a little
+        # still matches, instead of requiring pixel-perfect alignment. 0 = legacy.
+        a.preset_gap_search_margin_var = tk.StringVar(value="0.0")
+        margin_row = ttk.Frame(wizard)
+        margin_row.grid(row=17, column=0, columnspan=4, sticky="ew", padx=(12, 12), pady=5)
+        ttk.Label(margin_row, text="Margin Pencarian (0-1)").pack(side="left", padx=(0, 4))
+        ttk.Entry(margin_row, textvariable=a.preset_gap_search_margin_var, width=6).pack(side="left", padx=(0, 12))
+        ttk.Label(margin_row, text="(toleransi part geser/miring sedikit, 0 = harus pas persis)", foreground="gray").pack(side="left")
+        a._gap_threshold_widgets.append(margin_row)
+
         # Mean-Std threshold fields (shown only when method=mean_std_threshold)
         a._entry(wizard, 14, 0, "MEAN_MAX", a.preset_mean_max_var, columnspan=2)
         a._entry(wizard, 15, 0, "STD_MAX", a.preset_std_max_var, columnspan=2)

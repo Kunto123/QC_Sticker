@@ -727,7 +727,7 @@ class InspectionSessionService:
         if state.part_ready_latched:
             part_ready = {"part_ready": True, "status": "latched", "match_ratio": 1.0}
         else:
-            part_ready = self._evaluate_part_ready(part_ready_frame, state)
+            part_ready = self._evaluate_part_ready(part_ready_frame, state, raw_frame=frame)
         presence = self._detect_part_presence(part_ready_frame)
         timings["part_ready_eval_ms"] = _elapsed_ms(part_ready_started)
 
@@ -1703,6 +1703,28 @@ class InspectionSessionService:
         meta = {"x": x, "y": y, "width": x2 - x, "height": y2 - y}
         return cropped, meta
 
+    def _expand_roi_for_gap_search(
+        self, raw_frame, base_roi: RoiGeometry, override: dict[str, Any], margin: float
+    ):
+        """Crop ``raw_frame`` to ``part_ready_roi`` grown by ``margin`` (fraction
+        of the ROI's own w/h, each side), clamped to frame bounds. Used only by
+        gap_template_match to give cv2.matchTemplate room to search instead of
+        comparing at a single fixed offset. Returns None on a degenerate crop."""
+        roi = self._merged_roi_payload(base_roi, override)
+        height, width = raw_frame.shape[:2]
+        roi_w_frac = float(roi.get("w", 1.0))
+        roi_h_frac = float(roi.get("h", 1.0))
+        x_frac = float(roi.get("x", 0.0)) - margin * roi_w_frac
+        y_frac = float(roi.get("y", 0.0)) - margin * roi_h_frac
+        w_frac = roi_w_frac * (1.0 + 2.0 * margin)
+        h_frac = roi_h_frac * (1.0 + 2.0 * margin)
+        x = max(0, min(width - 1, int(x_frac * width)))
+        y = max(0, min(height - 1, int(y_frac * height)))
+        x2 = max(x + 1, min(width, int(round((x_frac + w_frac) * width))))
+        y2 = max(y + 1, min(height, int(round((y_frac + h_frac) * height))))
+        cropped = raw_frame[y:y2, x:x2]
+        return cropped if cropped.size > 0 else None
+
     def _on_inference_done(
         self, future: concurrent.futures.Future, state: SessionState
     ) -> None:
@@ -1790,7 +1812,7 @@ class InspectionSessionService:
             "area_ratio": round(area_ratio, 6),
         }
 
-    def _evaluate_part_ready(self, frame, state: SessionState) -> dict[str, Any]:
+    def _evaluate_part_ready(self, frame, state: SessionState, raw_frame=None) -> dict[str, Any]:
         config = state.template.part_ready
         if not config.enabled:
             return {
@@ -1809,7 +1831,7 @@ class InspectionSessionService:
         if method == "mean_std_threshold":
             result = self._evaluate_part_ready_mean_std(frame, state, config)
         elif method == "gap_template_match":
-            result = self._evaluate_part_ready_gap(frame, state, config)
+            result = self._evaluate_part_ready_gap(frame, state, config, raw_frame=raw_frame)
         else:
             # Item 2: fail-closed on unsupported method — don't silently substitute gap
             logger.error(
@@ -1844,7 +1866,7 @@ class InspectionSessionService:
 
         return result
 
-    def _evaluate_part_ready_gap(self, frame, state: SessionState, config) -> dict[str, Any]:
+    def _evaluate_part_ready_gap(self, frame, state: SessionState, config, raw_frame=None) -> dict[str, Any]:
         """Gap detection via template matching against reference patch."""
         from backend.app.services.gap_detector import load_ref_patch, match_gap, get_ref_path
 
@@ -1852,6 +1874,7 @@ class InspectionSessionService:
         threshold = float(getattr(config, "gap_match_threshold", 0.85) or 0.85)
         canny_low = getattr(config, "canny_low", None)
         canny_high = getattr(config, "canny_high", None)
+        margin = max(0.0, float(getattr(config, "gap_search_margin", 0.0) or 0.0))
 
         # Load reference patch (cached in state if available)
         cache_key = f"_gap_ref_{state.template.id}_{ref_path}"
@@ -1876,12 +1899,25 @@ class InspectionSessionService:
                 "gap_method": "template_match",
             }
 
-        # frame sudah di-crop ke part_ready_roi oleh _crop_stage_roi
-        # — gunakan full dimensi frame sebagai area pencarian gap
-        _fh, _fw = frame.shape[:2]
+        # frame sudah di-crop ke part_ready_roi oleh _crop_stage_roi. Kalau
+        # part_ready_roi == ref_patch persis (margin=0, default lama), area
+        # pencarian match_gap 1:1 dengan template → cv2.matchTemplate cuma
+        # punya 1 posisi untuk dicoba, jadi part yang geser sedikit pun gagal.
+        # gap_search_margin>0 memperbesar area pencarian di sekitar ROI (dari
+        # raw_frame yang belum dipotong) supaya ada ruang geser — ref_patch
+        # sendiri TIDAK berubah, jadi kalibrasi lama tetap valid.
+        search_frame = frame
+        if margin > 0.0 and raw_frame is not None:
+            expanded = self._expand_roi_for_gap_search(
+                raw_frame, state.template.part_ready_roi, state.part_ready_roi_override, margin,
+            )
+            if expanded is not None:
+                search_frame = expanded
+
+        _fh, _fw = search_frame.shape[:2]
         roi = {"x": 0, "y": 0, "w": _fw, "h": _fh}
 
-        result = match_gap(frame, roi, ref_patch, threshold, canny_low=canny_low, canny_high=canny_high)
+        result = match_gap(search_frame, roi, ref_patch, threshold, canny_low=canny_low, canny_high=canny_high)
         score = result["score"]
         ready = result["match"]
 

@@ -43,6 +43,12 @@ class PartReadyConfig:
     # from the ROI's own brightness median (legacy behaviour, unchanged default).
     canny_low: int | None = None
     canny_high: int | None = None
+    # gap_template_match only: how far (fraction of the ROI's own w/h, each
+    # side) the runtime search area is grown beyond part_ready_roi so
+    # cv2.matchTemplate has room to find a shifted part instead of comparing
+    # at a single fixed offset. 0.0 = legacy behaviour (search area == ROI ==
+    # reference patch size, zero translation tolerance).
+    gap_search_margin: float = 0.0
     min_match_ratio: float = 0.5
     stable_ms: int = 500
     release_ms: int = 300
