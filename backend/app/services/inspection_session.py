@@ -829,11 +829,18 @@ class InspectionSessionService:
             # Sudah engaged — tetap settled tanpa melihat raw part_ready
             part_ready_settled = True
             settle_remaining_ms = 0.0
-        elif _settle_frames == 0:
-            # settle_ms == 0: immediate settle, no frame counting needed
-            part_ready_settled = True
-            settle_remaining_ms = 0.0
         elif _raw_part_ready and presence.get("present", False):
+            # _settle_frames == 0 (immediate settle) falls through here too:
+            # consecutive_part_ready_frames >= 0 is trivially true on the very
+            # first genuinely-ready frame, so it settles with no extra delay —
+            # but it still requires _raw_part_ready this frame. A dedicated
+            # "elif _settle_frames == 0: part_ready_settled = True" branch used
+            # to sit ahead of this one and set settled=True unconditionally,
+            # ignoring _raw_part_ready entirely — with part_ready_settle_ms
+            # defaulting to 0 system-wide, that latched part_ready on literally
+            # the first frame of every session regardless of what the camera
+            # showed (e.g. a covered lens scoring 0.07 against an 0.85
+            # threshold still reported 100% "ready").
             state.consecutive_part_ready_frames += 1
             part_ready_settled = state.consecutive_part_ready_frames >= _settle_frames
             settle_remaining_ms = (

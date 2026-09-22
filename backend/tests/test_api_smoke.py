@@ -592,6 +592,13 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertEqual(session_response.status_code, 201, session_response.get_json())
         session_payload = session_response.get_json()
 
+        # This test exercises _validate_sticker's candidate-selection logic,
+        # not part_ready itself -- template 1 has no gap reference configured
+        # (correctly not-ready), so force the gate open deterministically
+        # instead of depending on the default template's part_ready state.
+        state = inspection_session_service._require_session(session_payload["session_id"])
+        state.part_ready_latched = True
+
         original_predict = inspection_session_service._sticker_inference.predict
 
         def fake_predict(*_args, **_kwargs):
@@ -651,6 +658,13 @@ class ApiSmokeTest(unittest.TestCase):
         )
         self.assertEqual(session_response.status_code, 201, session_response.get_json())
         session_payload = session_response.get_json()
+
+        # This test exercises _validate_sticker's offset/position logic, not
+        # part_ready itself -- template 1 has no gap reference configured
+        # (correctly not-ready), so force the gate open deterministically
+        # instead of depending on the default template's part_ready state.
+        state = inspection_session_service._require_session(session_payload["session_id"])
+        state.part_ready_latched = True
 
         original_predict = inspection_session_service._sticker_inference.predict
 
@@ -1615,7 +1629,11 @@ class ApiSmokeTest(unittest.TestCase):
 
     def test_13f_settle_metadata_present_in_response(self) -> None:
         """settle metadata keys must always appear in part_ready regardless of state."""
-        # Use default template (settle_ms=0 â†’ settled immediately) to verify keys
+        # Default template: settle_ms=0 (system default), gap_template_match with
+        # NO reference patch configured -> raw part_ready is correctly False
+        # ("no_reference"). settle_ms=0 means no extra frame-count delay is
+        # required once raw is ready, it does NOT mean "always settled" --
+        # settled must still track the real gate result.
         session_resp = self.client.post(
             "/inspection/sessions/start",
             json={
@@ -1640,10 +1658,13 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertIn("part_ready_settled", pr)
         self.assertIn("part_ready_settle_ms", pr)
         self.assertIn("part_ready_settle_remaining_ms", pr)
-        # Default template has settle_ms=0 â†’ always settled
-        self.assertTrue(pr["part_ready_settled"])
         self.assertEqual(pr["part_ready_settle_ms"], 0)
         self.assertEqual(pr["part_ready_settle_remaining_ms"], 0)
+        self.assertFalse(
+            pr["part_ready_settled"],
+            "No reference patch is configured on the default template, so raw "
+            "part_ready is False -- settle_ms=0 must not force settled=True.",
+        )
 
     @unittest.skip(_REQUIRES_REAL_STICKER_MODEL)
     def test_13h_settle_ms_controls_commit_after_settle_window(self) -> None:
@@ -1714,6 +1735,77 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertTrue(r4_payload["count_committed"],
                         "Must commit after event has been stable for â‰¥settle_ms ms")
         self.assertGreaterEqual(r4_payload["counters"]["session_total"], 1)
+
+    def test_13i_settle_zero_does_not_bypass_raw_part_ready_gate(self) -> None:
+        """Regression: settle_ms=0 (the system default when part_ready_settle_ms
+        is unset) must NOT latch part_ready when the real gate reports
+        not-ready. A dedicated 'elif _settle_frames == 0: part_ready_settled =
+        True' branch used to sit ahead of the raw-gated branch and fire
+        unconditionally, ignoring _raw_part_ready entirely -- so with the
+        settle default at 0 (which is also the app's shipped default),
+        part_ready latched True on literally the first frame of every
+        session regardless of what the camera showed (e.g. a gap_template_match
+        score of 0.07 against an 0.85 threshold still reported 100% "ready").
+        mean_std_threshold is used here (not gap_template_match) because it
+        needs no captured reference file to force raw part_ready=False.
+        """
+        response = self.client.post(
+            "/templates",
+            json={
+                "name": "Settle Zero Gate Regression",
+                "description": "",
+                "is_active": True,
+                "camera": {"camera_index": 0, "width": 640, "height": 480, "fps": 15},
+                "part_ready_roi": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
+                "sticker_roi": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
+                "vision": {"model_path": "models/dummy.pt", "classes": ["K0W-HB0"]},
+                "part_ready": {
+                    "enabled": True,
+                    "method": "mean_std_threshold",
+                    # _sample_image_b64()'s mean is well above 1.0, so this
+                    # forces the "empty" branch -> raw part_ready=False.
+                    "mean_max": 1.0,
+                    "std_max": 1.0,
+                },
+                "sticker": {
+                    "part_name": "Settle Zero Gate",
+                    "expected_class": "K0W-HB0",
+                    "enabled": True,
+                    "min_roi_confidence": 0.0,
+                    "part_ready_settle_ms": None,
+                },
+                "persistence": {"write_to_db": False},
+                "metadata": {"scenario": "settle-zero-gate-regression"},
+            },
+            headers=_headers(self.admin_token),
+        )
+        self.assertEqual(response.status_code, 201, response.get_json())
+        template = response.get_json()
+
+        session_resp = self.client.post(
+            "/inspection/sessions/start",
+            json={
+                "client_id": "settle-zero-gate",
+                "camera_index": 0,
+                "template_version_id": template["version_id"],
+                "line_id": "LINE-SETTLE",
+                "station_id": "ST-SETTLE-I",
+            },
+            headers=_headers(self.operator_token),
+        )
+        self.assertEqual(session_resp.status_code, 201, session_resp.get_json())
+        sid = session_resp.get_json()["session_id"]
+
+        frame_resp = self.client.post(
+            f"/inspection/sessions/{sid}/frame",
+            json={"image_b64": _sample_image_b64()},
+            headers=_headers(self.operator_token),
+        )
+        self.assertEqual(frame_resp.status_code, 200, frame_resp.get_json())
+        pr = frame_resp.get_json()["part_ready"]
+        self.assertFalse(pr["part_ready"], pr)
+        self.assertFalse(pr["part_ready_settled"], pr)
+        self.assertFalse(pr.get("part_ready_latched", False), pr)
 
     # ------------------------------------------------------------------
     # Phase 14: model registry rename
