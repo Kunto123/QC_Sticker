@@ -437,6 +437,9 @@ class ApiClient:
     def change_user_role(self, user_id: int, role: str) -> dict:
         return self._post(f"/auth/users/{user_id}/role", {"role": role})
 
+    def change_user_mc_id(self, user_id: int, mc_id: str) -> dict:
+        return self._post(f"/auth/users/{user_id}/mc-id", {"mc_id": mc_id})
+
     def reset_user_password(self, user_id: int, password: str) -> dict:
         return self._post(f"/auth/users/{user_id}/reset-password", {"password": password})
 

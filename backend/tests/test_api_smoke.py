@@ -22,7 +22,9 @@ from backend.tests._test_env import ensure_test_data_root  # noqa: E402
 
 TEST_DATA_ROOT = ensure_test_data_root()
 
+from backend.app.core.container import users_repo
 from backend.app.factory import create_app
+from shared.contracts.enums import UserRole
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -85,6 +87,10 @@ class ApiSmokeTest(unittest.TestCase):
         cls.app = create_app()
         cls.app.testing = True
         cls.client = cls.app.test_client()
+        # No accounts are seeded any more (removed 2026-09-23) — bootstrap the
+        # two accounts this suite logs in as directly against the repository.
+        users_repo.create_user("admin", "admin123", UserRole.ADMIN.value)
+        users_repo.create_user("operator", "operator123", UserRole.OPERATOR.value)
         cls.admin_token = cls._login("admin", "admin123")
         cls.operator_token = cls._login("operator", "operator123")
 
@@ -155,7 +161,7 @@ class ApiSmokeTest(unittest.TestCase):
         users_response = self.client.get("/auth/users", headers=_headers(self.admin_token))
         self.assertEqual(users_response.status_code, 200, users_response.get_json())
         roles = {str(item.get("role") or "") for item in users_response.get_json()}
-        self.assertLessEqual(roles, {"admin", "operator"})
+        self.assertLessEqual(roles, {UserRole.ADMIN.value, UserRole.OPERATOR.value})
         usernames = {str(item.get("username") or "") for item in users_response.get_json()}
         self.assertIn("admin", usernames)
         self.assertIn("operator", usernames)

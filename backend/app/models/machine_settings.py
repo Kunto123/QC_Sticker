@@ -78,6 +78,11 @@ class TimingConfig:
 
 
 @dataclass(slots=True)
+class IdentitySettings:
+    line: str = ""  # reserved — will back a separate table later
+
+
+@dataclass(slots=True)
 class InferenceConfig:
     """Sticker model runtime — per-PC hardware settings."""
     mode: str = "auto"      # auto | ultralytics | onnx | openvino | tflite | classic
@@ -105,6 +110,7 @@ class MachineSettings:
     io: PlcIoConfig = field(default_factory=PlcIoConfig)
     timing: TimingConfig = field(default_factory=TimingConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
+    identity: IdentitySettings = field(default_factory=IdentitySettings)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -113,6 +119,7 @@ class MachineSettings:
             "io": asdict(self.io),
             "timing": asdict(self.timing),
             "inference": asdict(self.inference),
+            "identity": asdict(self.identity),
         }
 
     @classmethod
@@ -127,4 +134,5 @@ class MachineSettings:
             io=_section(PlcIoConfig, io_raw),
             timing=_section(TimingConfig, data.get("timing")),
             inference=_section(InferenceConfig, data.get("inference")),
+            identity=_section(IdentitySettings, data.get("identity")),
         )

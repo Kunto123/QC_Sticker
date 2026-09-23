@@ -70,11 +70,11 @@ class AuthStorageWiringTest(unittest.TestCase):
                 sys.modules["pymodbus.exceptions"] = pymodbus_exceptions
                 sys.modules["pymodbus.framer"] = pymodbus_framer
 
-                def install_fake(name, class_name):
+                def install_fake(name, class_name, methods=None):
                     module = types.ModuleType(name)
-                    cls = type(class_name, (), {{
-                        "__init__": lambda self, *args, **kwargs: None,
-                    }})
+                    attrs = {{"__init__": lambda self, *args, **kwargs: None}}
+                    attrs.update(methods or {{}})
+                    cls = type(class_name, (), attrs)
                     setattr(module, class_name, cls)
                     sys.modules[name] = module
                     return cls
@@ -82,6 +82,7 @@ class AuthStorageWiringTest(unittest.TestCase):
                 expected_users_cls = install_fake(
                     f"backend.app.repositories.{{package_name}}.users_repository",
                     "{'SqlServerUsersRepository' if backend == 'sqlserver' else 'PostgresUsersRepository'}",
+                    methods={{"apply_machine_settings": lambda self, *a, **k: None}},
                 )
                 expected_mirror_cls = install_fake(
                     f"backend.app.repositories.{{package_name}}.inspection_mirror_repository",

@@ -52,23 +52,26 @@ class MachineSettingsTab:
 
         body = self.admin._make_scrollable_body(self.frame, "MachineSettings")
 
+        # ── Identity section ──
+        self._build_identity_section(body, 0)
+
         # ── Connection section ──
-        self._build_connection_section(body, 0)
+        self._build_connection_section(body, 1)
 
         # ── I/O Addresses section (unified — not split by mode) ──
-        self._build_io_section(body, 1)
+        self._build_io_section(body, 2)
 
         # ── Timer / Inspection Policy section ──
-        self._build_timing_section(body, 2)
+        self._build_timing_section(body, 3)
 
         # ── Inference section ──
-        self._build_inference_section(body, 3)
+        self._build_inference_section(body, 4)
 
         # ── Diagnostics section ──
-        self._build_diagnostics_section(body, 4)
+        self._build_diagnostics_section(body, 5)
 
         # ── Action buttons ──
-        self._build_actions(body, 5)
+        self._build_actions(body, 6)
 
     def _section_frame(self, parent, row: int, title: str) -> ctk.CTkFrame:
         section = ctk.CTkFrame(parent, fg_color=PANEL_ALT_BG, corner_radius=12, border_width=1, border_color=BORDER)
@@ -95,6 +98,13 @@ class MachineSettingsTab:
         cb = ctk.CTkCheckBox(parent, text=label, variable=var, font=("Segoe UI", 9), text_color=TEXT_PRIMARY)
         cb.grid(row=row, column=0, columnspan=2, sticky="w", padx=12, pady=2)
         return var
+
+    # ── Identity section ─────────────────────────────────────────────
+
+    def _build_identity_section(self, parent, row: int) -> None:
+        sec = self._section_frame(parent, row, "Identity")
+        r = 1
+        self._add_field(sec, r, "Line", "identity.line", ""); r += 1
 
     # ── Connection section ───────────────────────────────────────────
 

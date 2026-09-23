@@ -170,11 +170,11 @@ class AdminScreen(ctk.CTkFrame):
         self.sticker_roi_h_var = tk.StringVar(value="0.6")
 
         self.operator_username_var = tk.StringVar()
-        self.operator_password_var = tk.StringVar()
-        self.operator_role_var = tk.StringVar(value="operator")
+        self.operator_role_var = tk.StringVar(value="OPERATOR")
+        self.operator_mc_id_var = tk.StringVar()
         self.operator_edit_id: int | None = None
         self.operator_edit_username_var = tk.StringVar()
-        self.operator_edit_role_var = tk.StringVar(value="operator")
+        self.operator_edit_role_var = tk.StringVar(value="OPERATOR")
 
         # Unified RFID bind state
         self.bind_target_user_id: int | None = None
@@ -205,7 +205,7 @@ class AdminScreen(ctk.CTkFrame):
         self.header.columnconfigure(0, weight=1)
 
         user = self.state.user or {}
-        identity = f"{_safe_text(user.get('username'))} ({_safe_text(user.get('role'), 'admin')})"
+        identity = f"{_safe_text(user.get('username'))} ({_safe_text(user.get('role'), 'LEADERPI')})"
         ctk.CTkLabel(
             self.header,
             text="Admin Production Setup",
@@ -516,23 +516,36 @@ class AdminScreen(ctk.CTkFrame):
         self._clear_tree(self.users_table)
         users = list(self._users_cache)
         if not users:
-            self.users_table.insert("", "end", iid="__empty__", values=("-", "No users.", "", "", ""))
+            self.users_table.insert("", "end", iid="__empty__", values=("-", "No users.", "", "", "", ""))
             return
+        duplicate_ids: set[str] = set()
         for item in users:
             rfid_status = "Bound" if item.get("rfid_bound") else "Unbound"
             if item.get("rfid_uid_last4"):
                 rfid_status = f"*{_safe_text(item.get('rfid_uid_last4'))}"
-            self.users_table.insert(
-                "",
-                "end",
-                iid=str(item.get("id")),
-                values=(
-                    item.get("id"),
-                    _safe_text(item.get("username")),
-                    _safe_text(item.get("role")),
-                    _format_status(item.get("is_active", True)),
-                    rfid_status,
-                ),
+            try:
+                self.users_table.insert(
+                    "",
+                    "end",
+                    iid=str(item.get("id")),
+                    values=(
+                        item.get("id"),
+                        _safe_text(item.get("username")),
+                        _safe_text(item.get("role")),
+                        _safe_text(item.get("mc_id")),
+                        _format_status(item.get("is_active", True)),
+                        rfid_status,
+                    ),
+                )
+            except tk.TclError:
+                # Backend returned two rows with the same id (a DB-side PK
+                # problem, e.g. a desynced sequence) — skip the duplicate
+                # instead of aborting the render for every other row.
+                duplicate_ids.add(str(item.get("id")))
+        if duplicate_ids:
+            self._set_status(
+                f"Warning: {len(duplicate_ids)} user row(s) share a duplicate ID and were hidden "
+                "— check the database's primary key / sequence for the operator table."
             )
 
     # ------------------------------------------------------------------
@@ -551,12 +564,12 @@ class AdminScreen(ctk.CTkFrame):
             return
         self.operator_edit_id = user_id
         self.operator_edit_username_var.set(user.get("username", ""))
-        self.operator_edit_role_var.set(str(user.get("role") or "operator").strip().lower())
+        self.operator_edit_role_var.set(str(user.get("role") or "OPERATOR").strip().upper())
         self.operator_form_title.configure(text=f"Edit User #{user_id}")
-        self.operator_form_hint.configure(text="Change the role, optionally reset password, or delete this user.")
+        self.operator_form_hint.configure(text="Change the role/MC_ID, or delete this user.")
         self.operator_username_var.set(user.get("username", ""))
-        self.operator_password_var.set("")
-        self.operator_role_var.set(str(user.get("role") or "operator").strip().lower())
+        self.operator_role_var.set(str(user.get("role") or "OPERATOR").strip().upper())
+        self.operator_mc_id_var.set(str(user.get("mc_id") or ""))
         self.operator_save_btn.configure(text="Save Changes")
         self.operator_cancel_btn.configure(state="normal")
         self.operator_delete_btn.configure(state="normal")
@@ -565,8 +578,8 @@ class AdminScreen(ctk.CTkFrame):
         """Reset the form back to create mode."""
         self.operator_edit_id = None
         self.operator_username_var.set("")
-        self.operator_password_var.set("")
-        self.operator_role_var.set("operator")
+        self.operator_role_var.set("OPERATOR")
+        self.operator_mc_id_var.set("")
         self.operator_form_title.configure(text="Add User")
         self.operator_form_hint.configure(text="Create a new user, then bind RFID below.")
         self.operator_save_btn.configure(text="Create User")
@@ -627,42 +640,35 @@ class AdminScreen(ctk.CTkFrame):
         self.refresh_operators()
 
     def _on_save_user(self) -> None:
-        """Create new user or update existing user's role/password."""
+        """Create new user or update existing user's role/MC_ID."""
         username = self.operator_username_var.get().strip()
         if not username:
             messagebox.showerror("Users", "Username is required.")
             return
-        password = self.operator_password_var.get().strip()
-        if password and len(password) < 6:
-            messagebox.showerror("Users", "Password must be at least 6 characters.")
-            return
+        mc_id = self.operator_mc_id_var.get().strip()
 
         if self.operator_edit_id is not None:
-            # Edit mode — update role, and optionally reset password
+            # Edit mode — update role/MC_ID. Credential (RFID) changes go
+            # through Bind RFID below, there's no separate password.
             user_id = self.operator_edit_id
             new_role = self.operator_role_var.get().strip()
             try:
                 self.api.change_user_role(user_id, new_role)
-                if password:
-                    self.api.reset_user_password(user_id, password)
+                self.api.change_user_mc_id(user_id, mc_id)
             except Exception as exc:
                 messagebox.showerror("Users", str(exc))
                 return
             self._on_cancel_edit()
             self.refresh_operators()
-            suffix = " and password reset" if password else ""
-            self._set_status(f"User #{user_id} role changed to {new_role}{suffix}.")
+            self._set_status(f"User #{user_id} role changed to {new_role}.")
         else:
-            # Create mode — password required, no RFID here, user will bind below
-            if not password:
-                messagebox.showerror("Users", "Password is required.")
-                return
+            # Create mode — no RFID/password here, user will bind below
             role = self.operator_role_var.get().strip()
             try:
                 created = self.api.create_user({
                     "username": username,
-                    "password": password,
                     "role": role,
+                    "mc_id": mc_id,
                 })
                 user_id = int(created.get("id") or 0)
                 if user_id <= 0:
@@ -671,8 +677,8 @@ class AdminScreen(ctk.CTkFrame):
                 messagebox.showerror("Users", str(exc))
                 return
             self.operator_username_var.set("")
-            self.operator_password_var.set("")
-            self.operator_role_var.set("operator")
+            self.operator_role_var.set("OPERATOR")
+            self.operator_mc_id_var.set("")
             self.refresh_operators()
             # Auto-select the newly created user in the table and focus RFID entry
             self.bind_target_user_id = user_id

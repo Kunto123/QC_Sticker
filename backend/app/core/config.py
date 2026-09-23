@@ -17,8 +17,26 @@ Everything else that used to be an env knob is a fixed constant now.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
+
+
+_SQL_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$")
+
+
+def _sql_identifier(env_var: str, default: str) -> str:
+    """Read a table/column name from the environment, rejecting anything that
+    isn't a plain (optionally schema-qualified) SQL identifier — these values
+    get interpolated directly into SQL strings, so a bad env var must fail
+    fast at import time rather than open an injection surface."""
+    value = os.getenv(env_var, default).strip()
+    if not _SQL_IDENTIFIER_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"{env_var}={value!r} is not a valid SQL identifier "
+            "(letters, digits, underscore, optional schema prefix)."
+        )
+    return value
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -58,6 +76,16 @@ class AppConfig:
     postgresql_password: str = os.getenv("POSTGRESQL_PASSWORD", "")
     postgresql_schema: str = os.getenv("POSTGRESQL_SCHEMA", "public")
     postgresql_sslmode: str = os.getenv("POSTGRESQL_SSLMODE", "prefer")
+    # External "operator" table (owned by the factory MES, not this app) that
+    # backs authentication + user management on the SQL backends. Table and
+    # column names are deployment-specific — configurable so this app can
+    # point at whatever the site's own schema actually calls them.
+    operator_table: str = _sql_identifier("QC_SUITE_OPERATOR_TABLE", "operator")
+    operator_col_no: str = _sql_identifier("QC_SUITE_OPERATOR_COL_NO", "No")
+    operator_col_mc_id: str = _sql_identifier("QC_SUITE_OPERATOR_COL_MC_ID", "MC_ID")
+    operator_col_rfid: str = _sql_identifier("QC_SUITE_OPERATOR_COL_RFID", "No_RFID")
+    operator_col_member_id: str = _sql_identifier("QC_SUITE_OPERATOR_COL_MEMBER_ID", "Member_ID")
+    operator_col_status: str = _sql_identifier("QC_SUITE_OPERATOR_COL_STATUS", "StatusMP")
 
     # ── Fixed constants exposed on the instance (services read them here) ──
     access_token_ttl_seconds: int = ACCESS_TOKEN_TTL_SECONDS

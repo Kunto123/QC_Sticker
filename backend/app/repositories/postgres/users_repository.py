@@ -1,250 +1,102 @@
+"""Authentication backed by the factory's own `operator` table.
+
+That table (columns: No/MC_ID/No_RFID/Member_ID/StatusMP by default — see
+`QC_SUITE_OPERATOR_*` in core/config.py) is owned by another system (the
+plant MES), not by this app:
+
+- No auto-create / auto-migrate: the table must already exist. If it
+  doesn't, queries fail loudly instead of silently creating a shadow schema.
+- No default-account seeding: accounts are managed in the shared table.
+- MC_ID is plain per-row data, not a query scope: it tells an operator which
+  machine/station they're assigned to (set/edited from the Admin -> Operators
+  form), it does not filter which rows this app can see.
+- There is no password_hash column: the No_RFID value doubles as the login
+  password (typing it, or tapping the physical card, both compare against
+  the same column). There are also no is_active / created_at / updated_at /
+  last_login_at columns, so those concepts are best-effort (see set_active).
+"""
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from backend.app.core.config import AppConfig
-from backend.app.core.security import hash_password, verify_password
-from backend.app.repositories.postgres._base import PostgresRepositoryBase, _format_datetime, _utcnow_iso
+from backend.app.repositories.postgres._base import PostgresRepositoryBase
 from shared.contracts.auth import UserInfo
 from shared.contracts.enums import UserRole
 
 
-def _seed_users() -> list[dict[str, Any]]:
-    now = _utcnow_iso()
-    return [
-        {
-            "id": 1,
-            "username": "admin",
-            "password_hash": hash_password("admin123"),
-            "role": UserRole.ADMIN.value,
-            "is_active": True,
-            "created_at": now,
-            "updated_at": now,
-            "last_login_at": None,
-            "rfid_uid_hash": None,
-            "rfid_uid_last4": None,
-            "rfid_bound_at": None,
-        },
-        {
-            "id": 2,
-            "username": "operator",
-            "password_hash": hash_password("operator123"),
-            "role": UserRole.OPERATOR.value,
-            "is_active": True,
-            "created_at": now,
-            "updated_at": now,
-            "last_login_at": None,
-            "rfid_uid_hash": None,
-            "rfid_uid_last4": None,
-            "rfid_bound_at": None,
-        },
-    ]
+def _quote_ident(name: str) -> str:
+    return ".".join(f'"{part}"' for part in str(name).split("."))
 
 
 class PostgresUsersRepository(PostgresRepositoryBase):
-    TABLE_NAME = "qc_user_accounts"
-
     def __init__(self, config: AppConfig) -> None:
         super().__init__(config)
-        self._ensure_schema()
-        self._seed_defaults_if_empty()
-        self.migrate_legacy_roles()
+        self._table = _quote_ident(config.operator_table)
+        self._col_no = _quote_ident(config.operator_col_no)
+        self._col_mc_id = _quote_ident(config.operator_col_mc_id)
+        self._col_rfid = _quote_ident(config.operator_col_rfid)
+        self._col_member_id = _quote_ident(config.operator_col_member_id)
+        self._col_status = _quote_ident(config.operator_col_status)
 
-    def _ensure_schema(self) -> None:
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
-                        id BIGSERIAL PRIMARY KEY,
-                        username TEXT NOT NULL,
-                        password_hash TEXT NOT NULL,
-                        role TEXT NOT NULL,
-                        is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                        last_login_at TIMESTAMPTZ NULL
-                    )
-                    """
-                )
-                cursor.execute(
-                    f"""
-                    CREATE UNIQUE INDEX IF NOT EXISTS UX_{self.TABLE_NAME}_username
-                    ON {self.TABLE_NAME} (LOWER(username))
-                    """
-                )
-                cursor.execute(
-                    f"""
-                    ALTER TABLE {self.TABLE_NAME}
-                    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                    """
-                )
-                cursor.execute(
-                    f"""
-                    ALTER TABLE {self.TABLE_NAME}
-                    ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ NULL
-                    """
-                )
-                cursor.execute(
-                    f"""
-                    ALTER TABLE {self.TABLE_NAME}
-                    ADD COLUMN IF NOT EXISTS rfid_uid_hash TEXT NULL
-                    """
-                )
-                cursor.execute(
-                    f"""
-                    ALTER TABLE {self.TABLE_NAME}
-                    ADD COLUMN IF NOT EXISTS rfid_uid_last4 TEXT NULL
-                    """
-                )
-                cursor.execute(
-                    f"""
-                    ALTER TABLE {self.TABLE_NAME}
-                    ADD COLUMN IF NOT EXISTS rfid_bound_at TIMESTAMPTZ NULL
-                    """
-                )
-                cursor.execute(
-                    f"""
-                    CREATE UNIQUE INDEX IF NOT EXISTS UX_{self.TABLE_NAME}_rfid_uid_hash
-                    ON {self.TABLE_NAME} (rfid_uid_hash)
-                    WHERE rfid_uid_hash IS NOT NULL
-                    """
-                )
-            conn.commit()
-
-    def _seed_defaults_if_empty(self) -> None:
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(f"SELECT COUNT(1) AS count FROM {self.TABLE_NAME}")
-                count = int(cursor.fetchone()["count"] or 0)
-                if count > 0:
-                    return
-                for record in _seed_users():
-                    cursor.execute(
-                        f"""
-                        INSERT INTO {self.TABLE_NAME} (
-                            username,
-                            password_hash,
-                            role,
-                            is_active,
-                            created_at,
-                            updated_at,
-                            last_login_at
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            record["username"],
-                            record["password_hash"],
-                            record["role"],
-                            bool(record["is_active"]),
-                            record["created_at"],
-                            record["updated_at"],
-                            record["last_login_at"],
-                        ),
-                    )
-            conn.commit()
+    def _select_columns(self) -> str:
+        return (
+            f"{self._col_no} AS no_pk, "
+            f"{self._col_member_id} AS member_id, "
+            f"{self._col_rfid} AS rfid, "
+            f"{self._col_status} AS status_mp, "
+            f"{self._col_mc_id} AS mc_id"
+        )
 
     def _row_to_record(self, row: dict[str, Any] | None) -> dict[str, Any] | None:
         if not row:
             return None
+        rfid = str(row.get("rfid") or "").strip()
         return {
-            "id": int(row["id"]),
-            "username": str(row["username"]),
-            "password_hash": str(row["password_hash"]),
-            "role": str(row["role"]),
-            "is_active": bool(row.get("is_active", True)),
-            "created_at": _format_datetime(row.get("created_at")),
-            "updated_at": _format_datetime(row.get("updated_at")),
-            "last_login_at": _format_datetime(row.get("last_login_at")),
-            "rfid_uid_hash": row.get("rfid_uid_hash"),
-            "rfid_uid_last4": row.get("rfid_uid_last4"),
-            "rfid_bound_at": _format_datetime(row.get("rfid_bound_at")),
+            "id": int(row["no_pk"]),
+            "username": str(row.get("member_id") or ""),
+            "role": str(row.get("status_mp") or ""),
+            "mc_id": str(row.get("mc_id") or ""),
+            "rfid": rfid,
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+            "last_login_at": None,
+            "rfid_uid_last4": rfid[-4:] if rfid else None,
+            "rfid_bound_at": None,
         }
 
     def _public_record(self, record: dict[str, Any] | None) -> dict[str, Any] | None:
         if not record:
             return None
         return {
-            "id": int(record["id"]),
-            "username": str(record["username"]),
-            "role": str(record["role"]),
-            "is_active": bool(record.get("is_active", True)),
-            "created_at": record.get("created_at"),
-            "updated_at": record.get("updated_at"),
-            "last_login_at": record.get("last_login_at"),
+            "id": record["id"],
+            "username": record["username"],
+            "role": record["role"],
+            "mc_id": record.get("mc_id") or "",
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+            "last_login_at": None,
             "rfid_uid_last4": record.get("rfid_uid_last4"),
-            "rfid_bound_at": record.get("rfid_bound_at"),
-            "rfid_bound": bool(record.get("rfid_uid_hash")),
+            "rfid_bound_at": None,
+            "rfid_bound": bool(record.get("rfid")),
         }
-
-    def migrate_legacy_roles(self) -> int:
-        now = _utcnow_iso()
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    UPDATE {self.TABLE_NAME}
-                    SET role = %s, updated_at = %s
-                    WHERE LOWER(role) = %s
-                    """,
-                    (
-                        UserRole.ADMIN.value,
-                        now,
-                        "engineer",
-                    ),
-                )
-                updated = int(cursor.rowcount or 0)
-            conn.commit()
-        return max(0, updated)
 
     def list_users(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    SELECT
-                        id,
-                        username,
-                        password_hash,
-                        role,
-                        is_active,
-                        created_at,
-                        updated_at,
-                        last_login_at,
-                        rfid_uid_hash,
-                        rfid_uid_last4,
-                        rfid_bound_at
-                    FROM {self.TABLE_NAME}
-                    ORDER BY id ASC
-                    """
-                )
+                cursor.execute(f"SELECT {self._select_columns()} FROM {self._table} ORDER BY {self._col_no} ASC")
                 rows = cursor.fetchall()
         return [self._public_record(self._row_to_record(row)) for row in rows]
 
     def get_by_username(self, username: str) -> dict[str, Any] | None:
-        normalized = username.strip().lower()
+        normalized = username.strip()
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    f"""
-                    SELECT
-                        id,
-                        username,
-                        password_hash,
-                        role,
-                        is_active,
-                        created_at,
-                        updated_at,
-                        last_login_at,
-                        rfid_uid_hash,
-                        rfid_uid_last4,
-                        rfid_bound_at
-                    FROM {self.TABLE_NAME}
-                    WHERE LOWER(username) = %s
-                    LIMIT 1
-                    """,
+                    f"SELECT {self._select_columns()} FROM {self._table} "
+                    f"WHERE UPPER({self._col_member_id}) = UPPER(%s) LIMIT 1",
                     (normalized,),
                 )
                 row = cursor.fetchone()
@@ -254,53 +106,8 @@ class PostgresUsersRepository(PostgresRepositoryBase):
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    f"""
-                    SELECT
-                        id,
-                        username,
-                        password_hash,
-                        role,
-                        is_active,
-                        created_at,
-                        updated_at,
-                        last_login_at,
-                        rfid_uid_hash,
-                        rfid_uid_last4,
-                        rfid_bound_at
-                    FROM {self.TABLE_NAME}
-                    WHERE id = %s
-                    LIMIT 1
-                    """,
+                    f"SELECT {self._select_columns()} FROM {self._table} WHERE {self._col_no} = %s LIMIT 1",
                     (int(user_id),),
-                )
-                row = cursor.fetchone()
-        return self._row_to_record(row)
-
-    def get_by_rfid_uid_hash(self, rfid_uid_hash: str) -> dict[str, Any] | None:
-        normalized_hash = str(rfid_uid_hash or "").strip()
-        if not normalized_hash:
-            return None
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    SELECT
-                        id,
-                        username,
-                        password_hash,
-                        role,
-                        is_active,
-                        created_at,
-                        updated_at,
-                        last_login_at,
-                        rfid_uid_hash,
-                        rfid_uid_last4,
-                        rfid_bound_at
-                    FROM {self.TABLE_NAME}
-                    WHERE rfid_uid_hash = %s
-                    LIMIT 1
-                    """,
-                    (normalized_hash,),
                 )
                 row = cursor.fetchone()
         return self._row_to_record(row)
@@ -312,7 +119,7 @@ class PostgresUsersRepository(PostgresRepositoryBase):
             id=int(record["id"]),
             username=str(record["username"]),
             role=UserRole(str(record["role"])),
-            is_active=bool(record.get("is_active", True)),
+            is_active=True,
         )
 
     def get_user_info(self, user_id: int) -> UserInfo | None:
@@ -320,121 +127,86 @@ class PostgresUsersRepository(PostgresRepositoryBase):
 
     def authenticate(self, username: str, password: str) -> UserInfo | None:
         record = self.get_by_username(username)
-        if not record or not record.get("is_active"):
+        if not record:
             return None
-        if not verify_password(password, str(record.get("password_hash") or "")):
+        if str(password or "").strip().upper() != str(record.get("rfid") or "").strip().upper():
             return None
-        now = _utcnow_iso()
+        return self.to_user_info(record)
+
+    def authenticate_rfid(self, *, normalized_uid: str, rfid_uid_hash: str) -> UserInfo | None:
+        normalized = str(normalized_uid or "").strip().upper()
+        if not normalized:
+            return None
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    f"""
-                    UPDATE {self.TABLE_NAME}
-                    SET last_login_at = %s, updated_at = %s
-                    WHERE id = %s
-                    """,
-                    (now, now, int(record["id"])),
+                    f"SELECT {self._select_columns()} FROM {self._table} "
+                    f"WHERE UPPER({self._col_rfid}) = %s LIMIT 1",
+                    (normalized,),
                 )
-            conn.commit()
-        record["last_login_at"] = now
-        record["updated_at"] = now
-        return self.to_user_info(record)
+                row = cursor.fetchone()
+        record = self._row_to_record(row)
+        return self.to_user_info(record) if record else None
 
-    def authenticate_rfid_hash(self, rfid_uid_hash: str) -> UserInfo | None:
-        record = self.get_by_rfid_uid_hash(rfid_uid_hash)
-        if not record or not record.get("is_active"):
-            return None
-        now = _utcnow_iso()
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    UPDATE {self.TABLE_NAME}
-                    SET last_login_at = %s, updated_at = %s
-                    WHERE id = %s
-                    """,
-                    (now, now, int(record["id"])),
-                )
-            conn.commit()
-        record["last_login_at"] = now
-        record["updated_at"] = now
-        return self.to_user_info(record)
-
-    def create_user(self, username: str, password: str, role: str) -> dict[str, Any]:
+    def create_user(self, username: str, password: str, role: str, mc_id: str = "") -> dict[str, Any]:
         normalized_username = username.strip()
         if not normalized_username:
             raise ValueError("Username is required.")
         if self.get_by_username(normalized_username):
             raise ValueError("Username already exists.")
         role_enum = UserRole(role)
-        now = _utcnow_iso()
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    INSERT INTO {self.TABLE_NAME} (
-                        username,
-                        password_hash,
-                        role,
-                        is_active,
-                        created_at,
-                        updated_at,
-                        last_login_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id,
-                              username,
-                              password_hash,
-                              role,
-                              is_active,
-                              created_at,
-                              updated_at,
-                              last_login_at,
-                              rfid_uid_hash,
-                              rfid_uid_last4,
-                              rfid_bound_at
-                    """,
-                    (
-                        normalized_username,
-                        hash_password(password),
-                        role_enum.value,
-                        True,
-                        now,
-                        now,
-                        None,
-                    ),
-                )
-                row = cursor.fetchone()
-            conn.commit()
+        rfid_value = str(password or "").strip().upper()
+        mc_id_value = str(mc_id or "").strip()
+        from psycopg.errors import UniqueViolation
+
+        row = None
+        for _attempt in range(5):
+            try:
+                with self._connect() as conn:
+                    with conn.cursor() as cursor:
+                        # Compute No = MAX(No) + 1 ourselves rather than trusting a DB
+                        # identity/sequence to stay in sync (the operator table can be
+                        # written to by other systems too). If another writer takes the
+                        # same number first, the real PK on No rejects it and we retry.
+                        cursor.execute(
+                            f"INSERT INTO {self._table} "
+                            f"({self._col_member_id}, {self._col_rfid}, {self._col_status}, "
+                            f"{self._col_mc_id}, {self._col_no}) "
+                            f"SELECT %s, %s, %s, %s, COALESCE(MAX({self._col_no}), 0) + 1 FROM {self._table} "
+                            f"RETURNING {self._select_columns()}",
+                            (normalized_username, rfid_value, role_enum.value, mc_id_value),
+                        )
+                        row = cursor.fetchone()
+                    conn.commit()
+                break
+            except UniqueViolation:
+                row = None
+                continue
+        if row is None:
+            raise ValueError("Failed to create user: could not allocate a free No after several attempts.")
         record = self._public_record(self._row_to_record(row))
         if record is None:
             raise ValueError("Failed to create user.")
         return record
 
     def set_active(self, user_id: int, is_active: bool) -> dict[str, Any]:
+        # No is_active column on the operator table — enabling/disabling
+        # accounts isn't supported on this backend, only add/edit/delete.
+        record = self.get_by_id(user_id)
+        if record is None:
+            raise ValueError("User not found.")
+        return self._public_record(record)
+
+    def set_role(self, user_id: int, role: str) -> dict[str, Any]:
+        role_enum = UserRole(role)
         if self.get_by_id(user_id) is None:
             raise ValueError("User not found.")
-        now = _utcnow_iso()
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    f"""
-                    UPDATE {self.TABLE_NAME}
-                    SET is_active = %s, updated_at = %s
-                    WHERE id = %s
-                    RETURNING id,
-                              username,
-                              password_hash,
-                              role,
-                              is_active,
-                              created_at,
-                              updated_at,
-                              last_login_at,
-                              rfid_uid_hash,
-                              rfid_uid_last4,
-                              rfid_bound_at
-                    """,
-                    (bool(is_active), now, int(user_id)),
+                    f"UPDATE {self._table} SET {self._col_status} = %s "
+                    f"WHERE {self._col_no} = %s RETURNING {self._select_columns()}",
+                    (role_enum.value, int(user_id)),
                 )
                 row = cursor.fetchone()
             conn.commit()
@@ -443,31 +215,15 @@ class PostgresUsersRepository(PostgresRepositoryBase):
             raise ValueError("User not found.")
         return record
 
-    def set_role(self, user_id: int, role: str) -> dict[str, Any]:
-        role_enum = UserRole(role)
+    def set_mc_id(self, user_id: int, mc_id: str) -> dict[str, Any]:
         if self.get_by_id(user_id) is None:
             raise ValueError("User not found.")
-        now = _utcnow_iso()
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    f"""
-                    UPDATE {self.TABLE_NAME}
-                    SET role = %s, updated_at = %s
-                    WHERE id = %s
-                    RETURNING id,
-                              username,
-                              password_hash,
-                              role,
-                              is_active,
-                              created_at,
-                              updated_at,
-                              last_login_at,
-                              rfid_uid_hash,
-                              rfid_uid_last4,
-                              rfid_bound_at
-                    """,
-                    (role_enum.value, now, int(user_id)),
+                    f"UPDATE {self._table} SET {self._col_mc_id} = %s "
+                    f"WHERE {self._col_no} = %s RETURNING {self._select_columns()}",
+                    (str(mc_id or "").strip(), int(user_id)),
                 )
                 row = cursor.fetchone()
             conn.commit()
@@ -482,75 +238,25 @@ class PostgresUsersRepository(PostgresRepositoryBase):
             raise ValueError("User not found.")
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(f"DELETE FROM {self.TABLE_NAME} WHERE id = %s", (int(user_id),))
-                conn.commit()
-        return record
+                cursor.execute(f"DELETE FROM {self._table} WHERE {self._col_no} = %s", (int(user_id),))
+            conn.commit()
+        return self._public_record(record)
 
     def set_password(self, user_id: int, new_password: str) -> dict[str, Any]:
-        if self.get_by_id(user_id) is None:
-            raise ValueError("User not found.")
-        now = _utcnow_iso()
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    UPDATE {self.TABLE_NAME}
-                    SET password_hash = %s, updated_at = %s
-                    WHERE id = %s
-                    RETURNING id,
-                              username,
-                              password_hash,
-                              role,
-                              is_active,
-                              created_at,
-                              updated_at,
-                              last_login_at,
-                              rfid_uid_hash,
-                              rfid_uid_last4,
-                              rfid_bound_at
-                    """,
-                    (hash_password(new_password), now, int(user_id)),
-                )
-                row = cursor.fetchone()
-            conn.commit()
-        record = self._public_record(self._row_to_record(row))
-        if record is None:
-            raise ValueError("User not found.")
-        return record
+        return self.set_rfid_uid(user_id, normalized_uid=new_password, rfid_uid_hash="", rfid_uid_last4="")
 
-    def set_rfid_uid_hash(self, user_id: int, rfid_uid_hash: str, rfid_uid_last4: str) -> dict[str, Any]:
-        normalized_hash = str(rfid_uid_hash or "").strip()
-        if not normalized_hash:
+    def set_rfid_uid(self, user_id: int, *, normalized_uid: str, rfid_uid_hash: str, rfid_uid_last4: str) -> dict[str, Any]:
+        rfid_value = str(normalized_uid or "").strip().upper()
+        if not rfid_value:
             raise ValueError("RFID UID is required.")
-        existing = self.get_by_rfid_uid_hash(normalized_hash)
-        if existing is not None and int(existing["id"]) != int(user_id):
-            raise ValueError("RFID card is already bound to another user.")
         if self.get_by_id(user_id) is None:
             raise ValueError("User not found.")
-        now = _utcnow_iso()
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    f"""
-                    UPDATE {self.TABLE_NAME}
-                    SET rfid_uid_hash = %s,
-                        rfid_uid_last4 = %s,
-                        rfid_bound_at = %s,
-                        updated_at = %s
-                    WHERE id = %s
-                    RETURNING id,
-                              username,
-                              password_hash,
-                              role,
-                              is_active,
-                              created_at,
-                              updated_at,
-                              last_login_at,
-                              rfid_uid_hash,
-                              rfid_uid_last4,
-                              rfid_bound_at
-                    """,
-                    (normalized_hash, str(rfid_uid_last4 or "")[-4:] or None, now, now, int(user_id)),
+                    f"UPDATE {self._table} SET {self._col_rfid} = %s "
+                    f"WHERE {self._col_no} = %s RETURNING {self._select_columns()}",
+                    (rfid_value, int(user_id)),
                 )
                 row = cursor.fetchone()
             conn.commit()
@@ -562,30 +268,12 @@ class PostgresUsersRepository(PostgresRepositoryBase):
     def clear_rfid_uid(self, user_id: int) -> dict[str, Any]:
         if self.get_by_id(user_id) is None:
             raise ValueError("User not found.")
-        now = _utcnow_iso()
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    f"""
-                    UPDATE {self.TABLE_NAME}
-                    SET rfid_uid_hash = NULL,
-                        rfid_uid_last4 = NULL,
-                        rfid_bound_at = NULL,
-                        updated_at = %s
-                    WHERE id = %s
-                    RETURNING id,
-                              username,
-                              password_hash,
-                              role,
-                              is_active,
-                              created_at,
-                              updated_at,
-                              last_login_at,
-                              rfid_uid_hash,
-                              rfid_uid_last4,
-                              rfid_bound_at
-                    """,
-                    (now, int(user_id)),
+                    f"UPDATE {self._table} SET {self._col_rfid} = NULL "
+                    f"WHERE {self._col_no} = %s RETURNING {self._select_columns()}",
+                    (int(user_id),),
                 )
                 row = cursor.fetchone()
             conn.commit()

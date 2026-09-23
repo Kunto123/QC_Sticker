@@ -11,11 +11,13 @@ def _utcnow_iso() -> str:
 
 
 class SqlServerInspectionMirrorRepository:
+    """Pushes inspection results to `dbo.qc_inspection_push`, which must
+    already exist — this repository never creates or alters it."""
+
     TABLE_NAME = "dbo.qc_inspection_push"
 
     def __init__(self, config: AppConfig) -> None:
         self._config = config
-        self._ensure_schema()
 
     def _connect(self):
         import pyodbc
@@ -30,43 +32,6 @@ class SqlServerInspectionMirrorRepository:
             "TrustServerCertificate=yes;"
         )
         return pyodbc.connect(connection_string, timeout=5)
-
-    def _ensure_schema(self) -> None:
-        with self._connect() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                f"""
-                IF OBJECT_ID('{self.TABLE_NAME}', 'U') IS NULL
-                BEGIN
-                    CREATE TABLE {self.TABLE_NAME} (
-                        id INT IDENTITY(1,1) PRIMARY KEY,
-                        PartName NVARCHAR(150) NULL,
-                        DateCheckMC DATETIMEOFFSET NOT NULL CONSTRAINT DF_qc_inspection_push_DateCheckMC DEFAULT SYSUTCDATETIME(),
-                        MPCheck NVARCHAR(100) NULL,
-                        Data1 FLOAT NULL,
-                        Data2 FLOAT NULL,
-                        Line NVARCHAR(100) NULL
-                    )
-                END
-                """
-            )
-            for column_name, sql_type in (
-                ("PartName", "NVARCHAR(150) NULL"),
-                ("DateCheckMC", "DATETIMEOFFSET NOT NULL CONSTRAINT DF_qc_inspection_results_DateCheckMC DEFAULT SYSUTCDATETIME()"),
-                ("MPCheck", "NVARCHAR(100) NULL"),
-                ("Data1", "FLOAT NULL"),
-                ("Data2", "FLOAT NULL"),
-                ("Line", "NVARCHAR(100) NULL"),
-            ):
-                cursor.execute(
-                    f"""
-                    IF COL_LENGTH('{self.TABLE_NAME}', '{column_name}') IS NULL
-                    BEGIN
-                        ALTER TABLE {self.TABLE_NAME} ADD {column_name} {sql_type}
-                    END
-                    """
-                )
-            conn.commit()
 
     @staticmethod
     def build_sql_payload(payload: dict[str, Any]) -> dict[str, Any]:

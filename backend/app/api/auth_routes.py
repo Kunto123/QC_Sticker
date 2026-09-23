@@ -16,7 +16,7 @@ ALLOWED_MANAGED_ROLES = {UserRole.ADMIN.value, UserRole.OPERATOR.value}
 
 
 def _normalize_managed_role(raw_role: object, *, field_name: str = "role") -> str:
-    role = str(raw_role or "").strip().lower()
+    role = str(raw_role or "").strip().upper()
     if not role:
         raise ValueError(f"{field_name} is required")
     if role not in ALLOWED_MANAGED_ROLES:
@@ -43,9 +43,13 @@ def _try_audit(event_type: str, **kwargs) -> None:
         print(f"[audit] WARNING: failed to write audit event '{event_type}': {exc}", file=sys.stderr)
 
 
-def _rfid_hash_from_payload(payload: dict) -> tuple[str, str]:
+def _rfid_hash_from_payload(payload: dict) -> tuple[str, str, str]:
     normalized_uid = normalize_rfid_uid(payload.get("rfid_uid"))
-    return hash_rfid_uid(normalized_uid, app_config.secret_key), rfid_uid_last4(normalized_uid)
+    return (
+        hash_rfid_uid(normalized_uid, app_config.secret_key),
+        rfid_uid_last4(normalized_uid),
+        normalized_uid,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +71,7 @@ def login():
     rfid_last4 = ""
     if rfid_uid_input:
         try:
-            rfid_uid_hash, _uid_last4 = _rfid_hash_from_payload(payload)
+            rfid_uid_hash, _uid_last4, normalized_uid = _rfid_hash_from_payload(payload)
         except ValueError as exc:
             _try_audit(
                 "login_failure",
@@ -78,7 +82,7 @@ def login():
             )
             return jsonify({"error": "Invalid RFID card"}), 401
         rfid_last4 = _uid_last4
-        user = users_repo.authenticate_rfid_hash(rfid_uid_hash)
+        user = users_repo.authenticate_rfid(normalized_uid=normalized_uid, rfid_uid_hash=rfid_uid_hash)
         credential_label = "rfid"
     else:
         if not username_input or not password_input:
@@ -204,6 +208,7 @@ def create_user():
             username=str(payload.get("username") or "").strip(),
             password=str(payload.get("password") or "").strip(),
             role=role,
+            mc_id=str(payload.get("mc_id") or "").strip(),
         )
     except (ValueError, KeyError) as exc:
         return jsonify({"error": str(exc)}), 400
@@ -267,6 +272,29 @@ def change_user_role(user_id: int):
     return jsonify(record)
 
 
+@auth_blueprint.post("/users/<int:user_id>/mc-id")
+@require_roles(UserRole.ADMIN)
+def change_user_mc_id(user_id: int):
+    payload = request.get_json(force=True) or {}
+    mc_id = str(payload.get("mc_id") or "").strip()
+    try:
+        record = users_repo.set_mc_id(user_id, mc_id)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if "not found" in message.lower() else 400
+        return jsonify({"error": message}), status_code
+    _try_audit(
+        "mc_id_changed",
+        user_id=user_id,
+        username=record.get("username"),
+        actor_id=g.current_user.id,
+        actor_username=g.current_user.username,
+        ip_address=_client_ip(),
+        details=f"new_mc_id={mc_id}",
+    )
+    return jsonify(record)
+
+
 @auth_blueprint.post("/users/<int:user_id>/reset-password")
 @require_roles(UserRole.ADMIN)
 def reset_user_password(user_id: int):
@@ -298,8 +326,10 @@ def reset_user_password(user_id: int):
 def bind_user_rfid(user_id: int):
     payload = request.get_json(force=True) or {}
     try:
-        rfid_uid_hash, last4 = _rfid_hash_from_payload(payload)
-        record = users_repo.set_rfid_uid_hash(user_id, rfid_uid_hash, last4)
+        rfid_uid_hash, last4, normalized_uid = _rfid_hash_from_payload(payload)
+        record = users_repo.set_rfid_uid(
+            user_id, normalized_uid=normalized_uid, rfid_uid_hash=rfid_uid_hash, rfid_uid_last4=last4
+        )
     except ValueError as exc:
         message = str(exc)
         if "already bound" in message.lower():

@@ -12,29 +12,13 @@ def _utcnow() -> str:
 
 
 class PostgresInspectionMirrorRepository(PostgresRepositoryBase):
+    """Pushes inspection results to `qc_inspection_push`, which must already
+    exist — this repository never creates or alters it."""
+
     TABLE_NAME = "qc_inspection_push"
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__(config)
-        self._ensure_schema()
-
-    def _ensure_schema(self) -> None:
-        with self._connect() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
-                        id BIGSERIAL PRIMARY KEY,
-                        PartName TEXT NULL,
-                        DateCheckMC TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                        MPCheck TEXT NULL,
-                        Data1 DOUBLE PRECISION NULL,
-                        Data2 DOUBLE PRECISION NULL,
-                        Line TEXT NULL
-                    )
-                    """
-                )
-            conn.commit()
 
     @staticmethod
     def build_sql_payload(payload: dict[str, Any]) -> dict[str, Any]:

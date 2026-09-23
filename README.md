@@ -9,10 +9,7 @@ Greenfield QC suite in a separate folder, built as:
 
 Default runtime is local-first desktop: the client uses the embedded local transport by default, and split deployment is only needed for compatibility or remote access.
 
-Default seeded users:
-
-- `admin / admin123`
-- `operator / operator123`
+No default users are seeded. On `postgresql`/`sqlserver` backends, accounts live in the factory's own `operator` table (see `deploy/.env.example`); on the `local` backend, create the first user directly in `data/json_store/users.json` or via another already-authenticated admin session.
 
 ## Role Screens
 

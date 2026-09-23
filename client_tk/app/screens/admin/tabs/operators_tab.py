@@ -64,6 +64,7 @@ class OperatorsTab:
                 ("id", "ID", 50, "center"),
                 ("username", "Username", 140, "w"),
                 ("role", "Role", 80, "center"),
+                ("mc_id", "MC_ID", 90, "center"),
                 ("status", "Status", 80, "center"),
                 ("rfid", "RFID", 80, "center"),
             ],
@@ -98,27 +99,25 @@ class OperatorsTab:
         )
         a.operator_form_hint.grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=(2, 10))
         a._entry(form, 2, 0, "Username", a.operator_username_var, columns=2)
-        ttk.Label(form, text="Password").grid(row=3, column=0, sticky="w", padx=(12, 8), pady=5)
-        a.operator_password_entry = ttk.Entry(form, textvariable=a.operator_password_var, show="*")
-        a.operator_password_entry.grid(row=3, column=1, sticky="ew", padx=(0, 12), pady=5)
-        a.operator_password_hint = ctk.CTkLabel(
+        ttk.Label(form, text="Role").grid(row=3, column=0, sticky="w", padx=(12, 8), pady=5)
+        role_combo = ttk.Combobox(
             form,
-            text="Required for new users (min 6 chars). Leave blank when editing to keep current password.",
+            textvariable=a.operator_role_var,
+            values=("OPERATOR", "LEADERPI"),
+            state="readonly",
+            width=18,
+        )
+        role_combo.grid(row=3, column=1, sticky="ew", padx=(0, 12), pady=5)
+        a._entry(form, 4, 0, "MC_ID", a.operator_mc_id_var, columns=2)
+        ctk.CTkLabel(
+            form,
+            text="Which machine/station this operator works at. Set login credential "
+                 "(RFID) below in Bind RFID — there is no separate password.",
             text_color=TEXT_SECONDARY,
             font=("Segoe UI", 9),
             wraplength=420,
             justify="left",
-        )
-        a.operator_password_hint.grid(row=4, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 6))
-        ttk.Label(form, text="Role").grid(row=5, column=0, sticky="w", padx=(12, 8), pady=5)
-        role_combo = ttk.Combobox(
-            form,
-            textvariable=a.operator_role_var,
-            values=("operator", "admin"),
-            state="readonly",
-            width=18,
-        )
-        role_combo.grid(row=5, column=1, sticky="ew", padx=(0, 12), pady=5)
+        ).grid(row=5, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 6))
         btn_row = ctk.CTkFrame(form, fg_color="transparent")
         btn_row.grid(row=6, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 10))
         a.operator_save_btn = ctk.CTkButton(

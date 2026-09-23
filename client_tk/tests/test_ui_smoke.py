@@ -201,6 +201,9 @@ class _StubApi:
     def change_user_role(self, user_id: int, role: str):
         return {"id": user_id, "role": role}
 
+    def change_user_mc_id(self, user_id: int, mc_id: str):
+        return {"id": user_id, "mc_id": mc_id}
+
     def list_inspections(self, params=None):
         return []
 
@@ -712,7 +715,7 @@ class UiSmokeTest(unittest.TestCase):
                 screen._on_bind_rfid()
 
             self.assertEqual(created_payloads[-1]["username"], "operator-a")
-            self.assertEqual(created_payloads[-1]["role"], "operator")
+            self.assertEqual(created_payloads[-1]["role"], "OPERATOR")
             self.assertTrue(created_payloads[-1]["password"])
             self.assertEqual(bound_calls, [(77, "RFID-1234")])
             screen.destroy()

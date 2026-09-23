@@ -9,33 +9,9 @@ from shared.contracts.auth import UserInfo
 from shared.contracts.enums import UserRole
 
 
-def _seed_users() -> list[dict[str, Any]]:
-    users = [
-        (1, "admin", "admin123", UserRole.ADMIN),
-        (2, "operator", "operator123", UserRole.OPERATOR),
-    ]
-    now = datetime.now(UTC).isoformat()
-    return [
-        {
-            "id": user_id,
-            "username": username,
-            "password_hash": hash_password(password),
-            "role": role.value,
-            "is_active": True,
-            "created_at": now,
-            "updated_at": now,
-            "last_login_at": None,
-            "rfid_uid_hash": None,
-            "rfid_uid_last4": None,
-            "rfid_bound_at": None,
-        }
-        for user_id, username, password, role in users
-    ]
-
-
 class UsersRepository(JsonRepository):
     def __init__(self) -> None:
-        super().__init__("users.json", _seed_users())
+        super().__init__("users.json", [])
         self.migrate_legacy_roles()
         self.migrate_rfid_fields()
 
@@ -73,6 +49,7 @@ class UsersRepository(JsonRepository):
             "id": int(record["id"]),
             "username": str(record["username"]),
             "role": str(record["role"]),
+            "mc_id": record.get("mc_id") or "",
             "is_active": bool(record.get("is_active", True)),
             "created_at": record.get("created_at"),
             "updated_at": record.get("updated_at"),
@@ -131,7 +108,7 @@ class UsersRepository(JsonRepository):
         self.save(users)
         return self.to_user_info(record)
 
-    def authenticate_rfid_hash(self, rfid_uid_hash: str) -> UserInfo | None:
+    def authenticate_rfid(self, *, normalized_uid: str, rfid_uid_hash: str) -> UserInfo | None:
         users = self.load()
         normalized_hash = str(rfid_uid_hash or "").strip()
         record = next((item for item in users if str(item.get("rfid_uid_hash") or "") == normalized_hash), None)
@@ -143,7 +120,7 @@ class UsersRepository(JsonRepository):
         self.save(users)
         return self.to_user_info(record)
 
-    def create_user(self, username: str, password: str, role: str) -> dict[str, Any]:
+    def create_user(self, username: str, password: str, role: str, mc_id: str = "") -> dict[str, Any]:
         users = self.load()
         if self.get_by_username(username):
             raise ValueError("Username already exists.")
@@ -154,6 +131,7 @@ class UsersRepository(JsonRepository):
             "username": username.strip(),
             "password_hash": hash_password(password),
             "role": role_enum.value,
+            "mc_id": str(mc_id or "").strip(),
             "is_active": True,
             "created_at": now,
             "updated_at": now,
@@ -166,6 +144,16 @@ class UsersRepository(JsonRepository):
         self.save(users)
         return self._public_record(record)
 
+    def set_mc_id(self, user_id: int, mc_id: str) -> dict[str, Any]:
+        users = self.load()
+        for item in users:
+            if int(item["id"]) == int(user_id):
+                item["mc_id"] = str(mc_id or "").strip()
+                item["updated_at"] = datetime.now(UTC).isoformat()
+                self.save(users)
+                return self._public_record(item)
+        raise ValueError("User not found.")
+
     def set_active(self, user_id: int, is_active: bool) -> dict[str, Any]:
         users = self.load()
         for item in users:
@@ -176,7 +164,7 @@ class UsersRepository(JsonRepository):
                 return self._public_record(item)
         raise ValueError("User not found.")
 
-    def set_rfid_uid_hash(self, user_id: int, rfid_uid_hash: str, rfid_uid_last4: str) -> dict[str, Any]:
+    def set_rfid_uid(self, user_id: int, *, normalized_uid: str, rfid_uid_hash: str, rfid_uid_last4: str) -> dict[str, Any]:
         users = self.load()
         normalized_hash = str(rfid_uid_hash or "").strip()
         if not normalized_hash:
