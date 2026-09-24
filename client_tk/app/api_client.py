@@ -497,5 +497,15 @@ class ApiClient:
             {"address": address, "duration_ms": duration_ms, "confirm": "yes" if confirm else "no"},
         )
 
+    # ------------------------------------------------------------------
+    # Datapart guard
+    # ------------------------------------------------------------------
+
+    def get_datapart_guard_status(self) -> dict:
+        return self._get("/datapart-guard/status")
+
+    def override_datapart_guard(self, rfid_uid: str) -> dict:
+        return self._post("/datapart-guard/override-with-rfid", {"rfid_uid": rfid_uid})
+
     def plc_all_off(self) -> dict:
         return self._post("/machine-settings/plc/all-off", {})

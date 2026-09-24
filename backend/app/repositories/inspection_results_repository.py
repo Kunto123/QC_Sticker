@@ -54,39 +54,48 @@ class InspectionResultsRepository(JsonRepository):
         super().__init__("inspection_results.json", {"results": []})
 
     def create_result(self, payload: dict[str, Any]) -> dict[str, Any]:
-        store = self.load()
-        items = store["results"]
-        record = dict(payload)
-        record["id"] = self.next_id(items)
-        record.setdefault("push_status", "pending")
-        record.setdefault("retry_count", 0)
-        record.setdefault("inspected_at", datetime.now(UTC).isoformat())
-        items.append(record)
-        self.save(store)
-        return record
+        # Whole load->mutate->save sequence must hold the lock, not just the
+        # individual load()/save() calls — otherwise a concurrent writer (the
+        # push worker's background thread updating push_status on other rows)
+        # can load a stale snapshot between our load() and save() and silently
+        # overwrite this newly-appended record when it saves. RLock is
+        # reentrant, so the nested load()/save() calls below re-acquire fine.
+        with self._lock:
+            store = self.load()
+            items = store["results"]
+            record = dict(payload)
+            record["id"] = self.next_id(items)
+            record.setdefault("push_status", "pending")
+            record.setdefault("retry_count", 0)
+            record.setdefault("inspected_at", datetime.now(UTC).isoformat())
+            items.append(record)
+            self.save(store)
+            return record
 
     def update_result(self, result_id: int, patch: dict[str, Any]) -> dict[str, Any]:
-        store = self.load()
-        items = store["results"]
-        for item in items:
-            if int(item["id"]) != int(result_id):
-                continue
-            item.update(dict(patch))
-            self.save(store)
-            return item
-        raise ValueError("Inspection result not found.")
+        with self._lock:
+            store = self.load()
+            items = store["results"]
+            for item in items:
+                if int(item["id"]) != int(result_id):
+                    continue
+                item.update(dict(patch))
+                self.save(store)
+                return item
+            raise ValueError("Inspection result not found.")
 
     def delete_result(self, result_id: int) -> dict[str, Any]:
-        store = self.load()
-        items = store["results"]
-        for index, item in enumerate(items):
-            if int(item["id"]) != int(result_id):
-                continue
-            removed = dict(item)
-            del items[index]
-            self.save(store)
-            return removed
-        raise ValueError("Inspection result not found.")
+        with self._lock:
+            store = self.load()
+            items = store["results"]
+            for index, item in enumerate(items):
+                if int(item["id"]) != int(result_id):
+                    continue
+                removed = dict(item)
+                del items[index]
+                self.save(store)
+                return removed
+            raise ValueError("Inspection result not found.")
 
     def list_results(
         self,

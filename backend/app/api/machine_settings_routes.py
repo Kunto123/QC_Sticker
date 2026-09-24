@@ -82,6 +82,12 @@ def update_machine_settings():
     except Exception as exc:  # noqa: BLE001
         logger.warning("[machine-settings] failed to apply timing settings: %s", exc)
 
+    # identity.line is live-appliable (unlike connection/inference): the
+    # /auth/login operator gate reads app_config.machine_line_id directly,
+    # so it must be refreshed here too — not just on InspectionSessionService
+    # above — or a Line edit only takes effect after a backend restart.
+    app_config.machine_line_id = str(getattr(new_settings.identity, "line", "") or "").strip()
+
     return jsonify(_response(new_settings))
 
 

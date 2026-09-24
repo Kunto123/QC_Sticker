@@ -192,8 +192,8 @@ class QcSuiteDesktopApp(ctk.CTk):
         self.title("QC Suite")
         self.geometry("1440x900")
         self.minsize(1160, 720)
+        self.resizable(True, True)
         self.configure(fg_color=APP_BG)
-        self._enter_kiosk_mode()
 
         style = ttk.Style(self)
         configure_ttk_navy_theme(style)
@@ -237,20 +237,6 @@ class QcSuiteDesktopApp(ctk.CTk):
         self.bind_all("<Control-Shift-Q>", lambda _event: self._on_close())
         self.bind_all("<Control-Shift-q>", lambda _event: self._on_close())
         self._show_login()
-
-    def _enter_kiosk_mode(self) -> None:
-        try:
-            self.overrideredirect(True)
-            screen_width = self.winfo_screenwidth()
-            screen_height = self.winfo_screenheight()
-            self.geometry(f"{screen_width}x{screen_height}+0+0")
-            self.lift()
-            self.after_idle(self.focus_force)
-        except tk.TclError:
-            try:
-                self.attributes("-fullscreen", True)
-            except tk.TclError:
-                pass
 
     def _focus_login_rfid(self) -> None:
         try:

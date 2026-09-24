@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -37,6 +37,26 @@ def _sql_identifier(env_var: str, default: str) -> str:
             "(letters, digits, underscore, optional schema prefix)."
         )
     return value
+
+
+def _sql_identifier_list(env_var: str, default: str) -> list[str]:
+    """Like `_sql_identifier`, but the env var may name more than one column,
+    comma-separated — the same logical value is then written into every
+    listed column. For target tables that keep the same value duplicated
+    across redundant/legacy columns (e.g. both `DateCheckMC` and
+    `DateSendDB`)."""
+    raw = os.getenv(env_var, default)
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts:
+        raise ValueError(f"{env_var}={raw!r} must name at least one column.")
+    for part in parts:
+        if not _SQL_IDENTIFIER_PATTERN.fullmatch(part):
+            raise ValueError(
+                f"{env_var}={raw!r} contains {part!r}, which is not a valid SQL identifier "
+                "(letters, digits, underscore, optional schema prefix; separate multiple "
+                "column names with commas)."
+            )
+    return parts
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -86,6 +106,44 @@ class AppConfig:
     operator_col_rfid: str = _sql_identifier("QC_SUITE_OPERATOR_COL_RFID", "No_RFID")
     operator_col_member_id: str = _sql_identifier("QC_SUITE_OPERATOR_COL_MEMBER_ID", "Member_ID")
     operator_col_status: str = _sql_identifier("QC_SUITE_OPERATOR_COL_STATUS", "StatusMP")
+    # External inspection-result push table (owned by the plant MES /
+    # reporting system, not this app) that `HybridInspectionResultsRepository`
+    # mirrors accepted results into. Same rationale as the operator table
+    # above: never created/altered by this app, table and column names are
+    # deployment-specific. The five data columns keep the existing fixed
+    # logical mapping (PartName/DateCheckMC/MPCheck/Data1/Data2/Line from
+    # `build_sql_payload`) — only the *actual* column names on the target
+    # table are configurable here. Each of the five may name more than one
+    # physical column (comma-separated) when the target table keeps the same
+    # value duplicated across redundant columns — the same value is then
+    # written into every listed column on insert.
+    inspection_push_table: str = _sql_identifier("QC_SUITE_INSPECTION_TABLE", "qc_inspection_push")
+    inspection_push_col_id: str = _sql_identifier("QC_SUITE_INSPECTION_COL_ID", "id")
+    inspection_push_col_part_name: list[str] = field(
+        default_factory=lambda: _sql_identifier_list("QC_SUITE_INSPECTION_COL_PART_NAME", "PartName")
+    )
+    inspection_push_col_date_check_mc: list[str] = field(
+        default_factory=lambda: _sql_identifier_list("QC_SUITE_INSPECTION_COL_DATE_CHECK_MC", "DateCheckMC")
+    )
+    inspection_push_col_mp_check: list[str] = field(
+        default_factory=lambda: _sql_identifier_list("QC_SUITE_INSPECTION_COL_MP_CHECK", "MPCheck")
+    )
+    inspection_push_col_data1: list[str] = field(
+        default_factory=lambda: _sql_identifier_list("QC_SUITE_INSPECTION_COL_DATA1", "Data1")
+    )
+    inspection_push_col_data2: list[str] = field(
+        default_factory=lambda: _sql_identifier_list("QC_SUITE_INSPECTION_COL_DATA2", "Data2")
+    )
+    inspection_push_col_line: list[str] = field(
+        default_factory=lambda: _sql_identifier_list("QC_SUITE_INSPECTION_COL_LINE", "Line")
+    )
+    # Read-only column on the same push table — filled by a downstream MES
+    # process sometime after our insert, never by this app. The datapart
+    # guard (services/datapart_guard_service.py) polls it to decide whether
+    # a locked batch of accepted judgements can be released.
+    inspection_push_col_datapart_id: str = _sql_identifier(
+        "QC_SUITE_INSPECTION_COL_DATAPART_ID", "DatapartID"
+    )
 
     # ── Fixed constants exposed on the instance (services read them here) ──
     access_token_ttl_seconds: int = ACCESS_TOKEN_TTL_SECONDS
@@ -120,9 +178,17 @@ class AppConfig:
     session_idle_timeout_s: int = 300
     max_consecutive_rejects: int = 0
 
+    # ── Owned by machine_settings.json → `identity` (placeholder) ─────
+    # Falls back for SessionState.line_id when a session is started without
+    # one — the desktop client never sends line_id (line/station slots were
+    # removed 2026-09-18), so this is the only way "Line" on the SQL push
+    # ends up non-null. Admin -> Machine Settings -> Identity.
+    machine_line_id: str = ""
+
     def apply_machine_settings(self, settings) -> None:
         """Copy the `inference` and `timing` sections of MachineSettings onto this
         object so every service keeps reading `app_config.<field>` unchanged."""
+        self.machine_line_id = str(getattr(settings.identity, "line", "") or "").strip()
         inf = settings.inference
         self.sticker_inference_mode = str(inf.mode or "auto").strip().lower() or "auto"
         self.device_mode = str(inf.device or "auto").strip().lower() or "auto"

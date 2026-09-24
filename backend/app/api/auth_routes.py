@@ -119,6 +119,31 @@ def login():
         )
         return jsonify({"error": "Invalid credentials"}), 401
 
+    # Operators may only log in on the machine/line their MC_ID is assigned
+    # to (Admin -> Machine Settings -> Identity -> Line). LEADERPI/admin is
+    # never gated by this, so there's always a way to fix a wrong/blank Line
+    # without getting locked out. No restriction while Line itself is unset
+    # (fresh/unconfigured machine) — otherwise no operator could ever log in
+    # before an admin first sets it.
+    if user.role == UserRole.OPERATOR:
+        configured_line = str(getattr(app_config, "machine_line_id", "") or "").strip().upper()
+        if configured_line:
+            record = users_repo.get_by_id(user.id)
+            user_mc_id = str((record or {}).get("mc_id") or "").strip().upper()
+            if user_mc_id != configured_line:
+                _try_audit(
+                    "login_failure",
+                    user_id=user.id,
+                    username=user.username,
+                    ip_address=ip,
+                    client_name=client,
+                    details=(
+                        f"MC_ID '{user_mc_id or '-'}' does not match configured line "
+                        f"'{configured_line}'"
+                    ),
+                )
+                return jsonify({"error": "Akun ini tidak terdaftar untuk line mesin ini."}), 403
+
     session = token_store.issue(user, ip_address=ip, client_name=client, user_agent=ua)
     _try_audit(
         "login_success",

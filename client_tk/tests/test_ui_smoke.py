@@ -279,6 +279,13 @@ class _StubApi:
     def plc_all_off(self):
         return {"ok": True}
 
+    # Datapart guard
+    def get_datapart_guard_status(self):
+        return {"locked": False, "pending_ids": [], "batch_size": 5}
+
+    def override_datapart_guard(self, rfid_uid: str):
+        return {"locked": False, "pending_ids": [], "last_override_by": "stub-leaderpi"}
+
 
 
 @unittest.skipIf(tk is None, "Tkinter is not available in this environment")
@@ -324,6 +331,37 @@ class UiSmokeTest(unittest.TestCase):
         self.assertEqual(str(screen.template_selector["state"]), "readonly")
         self.assertTrue(screen.template_context.get().startswith("Template: QC Line A"))
         self.assertEqual(screen.template_choice.get(), "QC Line A | v1 | version_id=1")
+        screen.destroy()
+
+    def test_datapart_guard_popup_shows_and_dismisses(self) -> None:
+        from client_tk.app.components.datapart_guard_popup import DatapartGuardPopup
+
+        screen = OperatorScreen(self.root, self.api, self.state)
+        screen.update_idletasks()
+        self.assertIsNone(screen._datapart_guard_popup)
+
+        screen._show_datapart_guard_lock()
+        screen.update_idletasks()
+
+        self.assertIsInstance(screen._datapart_guard_popup, DatapartGuardPopup)
+        popup = screen._datapart_guard_popup
+        self.assertTrue(popup.winfo_exists())
+
+        # Showing it again while already open must not create a second popup.
+        screen._show_datapart_guard_lock()
+        self.assertIs(screen._datapart_guard_popup, popup)
+
+        # "Bypass" flow: switching to the RFID view builds an entry widget.
+        popup._build_bypass_view()
+        popup.update_idletasks()
+        self.assertTrue(hasattr(popup, "_rfid_entry"))
+        self.assertTrue(popup._rfid_entry.winfo_exists())
+
+        screen._dismiss_datapart_guard_lock()
+        screen.update_idletasks()
+
+        self.assertIsNone(screen._datapart_guard_popup)
+        self.assertFalse(popup.winfo_exists())
         screen.destroy()
 
     def test_operator_layout_switches_to_compact(self) -> None:

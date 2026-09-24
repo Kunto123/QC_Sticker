@@ -118,9 +118,9 @@ def main(check: bool = False) -> int:
                 from backend.app.repositories.sqlserver.inspection_mirror_repository import SqlServerInspectionMirrorRepository
                 from backend.app.repositories.sqlserver.users_repository import SqlServerUsersRepository
                 SqlServerUsersRepository(cfg)
-                print("[bootstrap]   dbo.qc_user_accounts ✓")
+                print(f"[bootstrap]   {cfg.operator_table} ✓")
                 SqlServerInspectionMirrorRepository(cfg)
-                print("[bootstrap]   dbo.qc_inspection_push ✓")
+                print(f"[bootstrap]   {cfg.inspection_push_table} ✓")
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"SQL Server schema migration failed: {exc}")
     elif backend == "postgresql":
@@ -131,9 +131,9 @@ def main(check: bool = False) -> int:
                 from backend.app.repositories.postgres.users_repository import PostgresUsersRepository
 
                 PostgresUsersRepository(cfg)
-                print("[bootstrap]   public.qc_user_accounts ✓")
+                print(f"[bootstrap]   {cfg.operator_table} ✓")
                 PostgresInspectionMirrorRepository(cfg)
-                print("[bootstrap]   public.qc_inspection_push ✓")
+                print(f"[bootstrap]   {cfg.inspection_push_table} ✓")
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"PostgreSQL schema migration failed: {exc}")
     else:

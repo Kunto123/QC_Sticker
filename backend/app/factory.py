@@ -8,6 +8,7 @@ from flask import Flask, jsonify
 
 from backend.app.api.auth_routes import auth_blueprint
 from backend.app.api.dashboard_routes import dashboard_blueprint
+from backend.app.api.datapart_guard_routes import datapart_guard_blueprint
 from backend.app.api.deployment_routes import deployment_blueprint
 from backend.app.api.inspection_routes import inspection_blueprint
 from backend.app.api.template_routes import template_blueprint
@@ -45,6 +46,7 @@ def create_app() -> Flask:
     app.register_blueprint(dashboard_blueprint)
     app.register_blueprint(workstation_blueprint)
     app.register_blueprint(machine_settings_blueprint)
+    app.register_blueprint(datapart_guard_blueprint)
 
     @app.get("/health")
     def health():
@@ -130,6 +132,13 @@ def _register_worker_lifecycle(app: Flask) -> None:
             logger.info("[factory] push worker started")
         except Exception as exc:  # noqa: BLE001
             logger.warning("[factory] push worker failed to start: %s", exc)
+
+        try:
+            from backend.app.core.container import datapart_guard_worker
+            datapart_guard_worker.start()
+            logger.info("[factory] datapart guard worker started")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[factory] datapart guard worker failed to start: %s", exc)
 
         try:
             from backend.app.core.container import plc_worker

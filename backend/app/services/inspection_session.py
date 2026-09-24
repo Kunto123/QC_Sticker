@@ -83,10 +83,12 @@ class InspectionSessionService:
         app_config: AppConfig | None = None,
         plc_worker=None,
         reject_log_repo: RejectLogRepository | None = None,
+        datapart_guard=None,
     ) -> None:
         self._template_runtime = template_runtime
         self._results_repo = results_repo
         self._sticker_inference = sticker_inference
+        self._datapart_guard = datapart_guard
         self._sessions: dict[str, SessionState] = {}
         self._lock = threading.RLock()
         self._accept_holdover_ms: int = (
@@ -179,6 +181,12 @@ class InspectionSessionService:
             max(1.0, float(getattr(app_config, "inference_timeout_s", 5.0)))
             if app_config is not None else 5.0
         )
+        # Fallback line_id for sessions started without one (the desktop
+        # client never sends line_id — see start_session below).
+        self._default_line_id: str = (
+            str(getattr(app_config, "machine_line_id", "") or "").strip()
+            if app_config is not None else ""
+        )
         # Register PLC state change callback
         if self._plc_worker is not None:
             self._plc_worker.set_on_state_change_callback(self._on_plc_state_change)
@@ -190,9 +198,10 @@ class InspectionSessionService:
         self._pending_actuations: dict[str, dict] = {}
 
     def apply_machine_settings(self, settings) -> None:
-        """Live-apply MachineSettings.timing (called after a Machine Settings save)."""
+        """Live-apply MachineSettings.timing + identity (called after a Machine Settings save)."""
         from dataclasses import asdict
         self.update_timing_settings(asdict(settings.timing))
+        self._default_line_id = str(getattr(settings.identity, "line", "") or "").strip()
 
     def update_timing_settings(self, data: dict) -> None:
         """Override timing/inspection settings at runtime (called after Machine Settings save).
@@ -501,13 +510,17 @@ class InspectionSessionService:
     ) -> dict[str, Any]:
         template = self._template_runtime.resolve_template_by_version(template_version_id)
         session_id = uuid.uuid4().hex
+        # The desktop client never sends line_id (line/station slots were
+        # removed 2026-09-18) — fall back to the configured machine identity
+        # so "Line" on the SQL push isn't silently null.
+        effective_line_id = line_id or (self._default_line_id or None)
         state = SessionState(
             session_id=session_id,
             client_id=client_id,
             camera_index=int(camera_index),
             template=template,
             status=SessionStatus.RUNNING,
-            line_id=line_id,
+            line_id=effective_line_id,
             station_id=station_id,
             session_reject_breakdown=_empty_reject_breakdown(),
             inference_interval_ms=0,
@@ -1407,12 +1420,29 @@ class InspectionSessionService:
             _policy_action = "low_confidence_pending"
             _pending_reason = "part_ready_below_min_confidence"
 
+        # ── Item 3: datapart guard ──
+        # Every DATAPART_GUARD_BATCH_SIZE accepted judgements pushed to the
+        # SQL mirror, block further commits (accept AND reject) until the
+        # downstream MES has filled DatapartID for all of them. Cheap
+        # in-memory check — the actual DB poll happens on DatapartGuardWorker's
+        # background thread, not here. Computed unconditionally (not gated
+        # behind _commit_allowed) so the client learns about the lock on the
+        # very next frame — not only once a new part happens to reach commit
+        # stability, which could be a long, indefinite wait with no part in
+        # view.
+        _datapart_guard_locked = self._datapart_guard is not None and self._datapart_guard.is_locked()
+        if _commit_allowed and _datapart_guard_locked:
+            _commit_allowed = False
+            _policy_action = "datapart_guard_locked"
+            _pending_reason = "datapart_id_not_confirmed"
+
         # Build inspection_policy response
         inspection_policy = {
             "action": _policy_action,
             "commit_allowed": _commit_allowed,
             "hard_reject": _is_hard_reject,
             "plc_fault": _plc_fault,
+            "datapart_guard_locked": _datapart_guard_locked,
             "pending_reason": _pending_reason,
             "stable_elapsed_ms": round(_stable_elapsed_ms, 1),
             "stable_frames": state.policy_stable_frames,
@@ -2532,8 +2562,18 @@ class InspectionSessionService:
 
         if not state.template.persistence.write_to_db:
             return {"written": False, "reason": "disabled"}
+        # Use the event_id parameter (the id of the event actually being
+        # committed right now), NOT state.current_event_id — by the time this
+        # runs, the caller's "full cycle reset" has already set
+        # state.current_event_id back to None for the *next* cycle. Reading
+        # it here collapsed persist_key to the same "event:ACCEPT:OK:<part>"
+        # string for every commit with the same decision/part_name, so only
+        # the first commit in a session ever persisted — every later one hit
+        # the duplicate_event guard below and was silently dropped, even
+        # though the in-memory session counter (which doesn't go through
+        # this dedup) kept incrementing normally.
         persist_key = (
-            f"{state.current_event_id or 'event'}:"
+            f"{event_id or 'event'}:"
             f"{validation.get('decision')}:"
             f"{validation.get('reject_reason_code') or 'OK'}:"
             f"{validation.get('part_name')}"
@@ -2546,6 +2586,10 @@ class InspectionSessionService:
                 "line_id": validation.get("line_id"),
                 "station_id": validation.get("station_id"),
                 "part_name": validation.get("part_name"),
+                # PartName pushed to SQL comes from the template's own name
+                # ("Preset Name" in Admin -> Templates), not expected_class —
+                # see build_sql_payload() in the mirror repos.
+                "template_name": state.template.name,
                 "mp_check": validation.get("mp_check"),
                 # data1/data2 mirror SQL contract: data1=part_ready confidence, data2=sticker confidence
                 "data1": validation.get("data1"),
@@ -2578,4 +2622,9 @@ class InspectionSessionService:
         )
         state.last_persisted_at = datetime.now(UTC)
         state.last_persisted_key = persist_key
+        if self._datapart_guard is not None and record.get("push_status") == "sent":
+            try:
+                self._datapart_guard.record_pushed(record.get("sql_mirror_id"))
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[inspection] datapart guard record_pushed failed: %s", exc)
         return {"written": True, "result_id": record["id"]}

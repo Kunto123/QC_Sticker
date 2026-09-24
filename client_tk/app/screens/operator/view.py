@@ -15,6 +15,7 @@ import numpy as np
 
 from client_tk.app.components.async_bridge import run_async
 from client_tk.app.components.counter_panel import BREAKDOWN_ORDER, CounterPanel
+from client_tk.app.components.datapart_guard_popup import DatapartGuardPopup
 from client_tk.app.components.live_view import LiveView
 from client_tk.app.components.result_panel import ResultPanel
 from client_tk.app.components.scrollable_frame import ScrollableFrame
@@ -43,6 +44,7 @@ BADGE_COLORS = {
 RESPONSIVE_BREAKPOINT = 1240
 HEARTBEAT_INTERVAL_MS = 20_000
 PLC_POLL_INTERVAL_MS = 2_000
+DATAPART_GUARD_POLL_INTERVAL_MS = 3_000
 
 
 AUTO_START_FRAME_WAIT_MS = 150
@@ -92,6 +94,8 @@ class OperatorScreen(ctk.CTkFrame):
         self._latest_plc_status: dict | None = None
         self._inference_running = False
         self._inference_thread: threading.Thread | None = None
+        self._datapart_guard_poll_after_id: str | None = None
+        self._datapart_guard_popup: DatapartGuardPopup | None = None
 
         self.camera_value = tk.StringVar(value="0")
         self.template_version_value = tk.StringVar()
@@ -126,6 +130,7 @@ class OperatorScreen(ctk.CTkFrame):
         # results only update status/overlay payload.
         self._schedule_heartbeat(delay_ms=1_000)
         self._schedule_plc_poll(delay_ms=4_000)
+        self._schedule_datapart_guard_poll(delay_ms=4_000)
         self.after_idle(self._auto_start_first_template)
 
     def _build_top_bar(self) -> None:
@@ -1733,6 +1738,106 @@ class OperatorScreen(ctk.CTkFrame):
         run_async(self, _load, callback=_on_done)
         self._schedule_plc_poll()
 
+    # ------------------------------------------------------------------
+    # Datapart guard: every 5 accepted judgements pushed to SQL, further
+    # judgements lock until a downstream MES process fills DatapartID for
+    # all 5 (or a LEADERPI bypasses it). Polled independently of the frame
+    # loop so it's still detected/cleared while the camera is paused.
+    # ------------------------------------------------------------------
+
+    def _schedule_datapart_guard_poll(self, *, delay_ms: int | None = None) -> None:
+        if self._closed:
+            return
+        if self._datapart_guard_poll_after_id:
+            try:
+                self.after_cancel(self._datapart_guard_poll_after_id)
+            except tk.TclError:
+                pass
+        wait = DATAPART_GUARD_POLL_INTERVAL_MS if delay_ms is None else max(500, int(delay_ms))
+        self._datapart_guard_poll_after_id = self.after(wait, self._poll_datapart_guard_status)
+
+    def _poll_datapart_guard_status(self) -> None:
+        self._datapart_guard_poll_after_id = None
+        if self._closed:
+            return
+        if not getattr(self.state, "token", None):
+            self._schedule_datapart_guard_poll()
+            return
+
+        def _load():
+            return self.api.get_datapart_guard_status()
+
+        def _on_done(result, error):
+            if self._closed:
+                return
+            if result and not error:
+                if result.get("locked"):
+                    self._show_datapart_guard_lock()
+                else:
+                    self._dismiss_datapart_guard_lock()
+            self._schedule_datapart_guard_poll()
+
+        run_async(self, _load, callback=_on_done)
+
+    def _show_datapart_guard_lock(self) -> None:
+        if self._datapart_guard_popup is not None:
+            return  # already showing
+        try:
+            if self.capture.is_active:
+                self.capture.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._datapart_guard_popup = DatapartGuardPopup(
+                self, on_bypass_rfid=self._handle_datapart_guard_bypass
+            )
+        except Exception:  # noqa: BLE001
+            self._datapart_guard_popup = None
+
+    def _dismiss_datapart_guard_lock(self) -> None:
+        if self._datapart_guard_popup is None:
+            return
+        try:
+            self._datapart_guard_popup.grab_release()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._datapart_guard_popup.destroy()
+        except Exception:  # noqa: BLE001
+            pass
+        self._datapart_guard_popup = None
+        if self.state.active_session and not self._closed:
+            self._start_camera(show_errors=False)
+
+    def _handle_datapart_guard_bypass(self, rfid_uid: str) -> None:
+        def _load():
+            return self.api.override_datapart_guard(rfid_uid)
+
+        def _on_done(result, error):
+            if self._closed:
+                return
+            if error or not result:
+                # Don't reuse _friendly_error here — its generic 401/403
+                # handling ("sesi login berakhir" / "akses ditolak") would be
+                # misleading for a card-scan flow. The backend's own message
+                # ("Kartu RFID tidak dikenali.", "Kartu ini bukan LEADERPI.")
+                # is already specific and in Indonesian — just strip the
+                # "NNN: " status-code prefix that ApiClient adds.
+                message = "Kartu RFID ditolak."
+                if error is not None:
+                    raw = str(error)
+                    for prefix in ("400:", "401:", "403:"):
+                        if raw.startswith(prefix):
+                            raw = raw[len(prefix):].strip()
+                            break
+                    message = raw or message
+                if self._datapart_guard_popup is not None:
+                    self._datapart_guard_popup.set_bypass_error(message)
+                return
+            self._dismiss_datapart_guard_lock()
+
+        run_async(self, _load, callback=_on_done)
+
     def _handle_plc_template_cycle_event(self, status: dict) -> None:
         raw_event_id = status.get("template_cycle_event_id")
         try:
@@ -1827,6 +1932,18 @@ class OperatorScreen(ctk.CTkFrame):
             except tk.TclError:
                 pass
             self._plc_poll_after_id = None
+        if self._datapart_guard_poll_after_id:
+            try:
+                self.after_cancel(self._datapart_guard_poll_after_id)
+            except tk.TclError:
+                pass
+            self._datapart_guard_poll_after_id = None
+        if self._datapart_guard_popup is not None:
+            try:
+                self._datapart_guard_popup.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+            self._datapart_guard_popup = None
         if self._auto_start_after_id:
             try:
                 self.after_cancel(self._auto_start_after_id)

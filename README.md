@@ -199,7 +199,45 @@ MSSQL_PASSWORD=...
 MSSQL_DRIVER=ODBC Driver 17 for SQL Server
 ```
 
-Relational backend hanya dipakai untuk `qc_user_accounts` dan `qc_inspection_push`.
+Relational backend hanya dipakai untuk dua tabel eksternal milik MES pabrik —
+bukan tabel yang dibuat/dimigrasikan oleh app ini, jadi tabel tsb harus sudah
+ada duluan di DB:
+
+- Tabel operator (login/RFID), default nama `operator` — override lewat
+  `QC_SUITE_OPERATOR_TABLE` dan `QC_SUITE_OPERATOR_COL_{NO,MC_ID,RFID,MEMBER_ID,STATUS}`
+  kalau skema di lapangan pakai nama tabel/kolom lain.
+- Tabel push hasil inspeksi, default nama `qc_inspection_push` — override
+  lewat `QC_SUITE_INSPECTION_TABLE` dan
+  `QC_SUITE_INSPECTION_COL_{ID,PART_NAME,DATE_CHECK_MC,MP_CHECK,DATA1,DATA2,LINE}`.
+  Mapping data logisnya (PartName/DateCheckMC/MPCheck/Data1/Data2/Line) tetap,
+  hanya nama kolom fisik di tabel tujuan yang bisa disesuaikan. Salah satu
+  `QC_SUITE_INSPECTION_COL_*` (kecuali `_ID`) boleh diisi lebih dari satu nama
+  kolom dipisah koma (tanpa spasi) — nilai yang sama akan ditulis ke semua
+  kolom yang disebutkan, buat tabel tujuan yang punya kolom duplikat/legacy
+  (mis. `QC_SUITE_INSPECTION_COL_DATE_CHECK_MC=DateCheckMC,DateSendDB`).
+  `MPCheck` juga diringkas otomatis jadi 4 digit tengah `Member_ID` (mis.
+  `"ID 9101 PUTRA"` → `"9101"`, fallback ke string aslinya kalau polanya tidak
+  ketemu), dan `Line` diringkas jadi karakter terakhir dari `identity.line`
+  (mis. `"GB3"` → `"3"`).
+
+**Datapart guard** (`QC_SUITE_INSPECTION_COL_DATAPART_ID`, default `DatapartID`,
+read-only — tidak pernah ditulis app ini): tiap 5 judgement ACCEPT yang sukses
+push ke SQL, judgement berikutnya otomatis dikunci sampai kolom `DatapartID`
+kelima baris itu terisi oleh sistem MES lain. `GET /datapart-guard/status`
+untuk cek status. Dua cara buka paksa kalau downstream macet lama:
+`POST /datapart-guard/override` (perlu sesi login admin), atau
+`POST /datapart-guard/override-with-rfid` (body `{"rfid_uid": ...}`, dipakai
+popup di client — sesi operator sendiri boleh dipakai, otorisasinya dari kartu
+RFID yang di-scan, bukan dari role sesi yang login).
+
+Di client operator: begitu terkunci, kamera otomatis berhenti dan muncul popup
+peringatan "scan DATAPART". Client polling `GET /datapart-guard/status` tiap
+3 detik (independen dari frame loop, tetap jalan meski kamera mati) — begitu
+`DatapartID` terisi, popup otomatis hilang dan kamera restart sendiri. Popup
+juga punya tombol "Bypass (RFID LEADERPI)" yang membuka form scan kartu; kalau
+kartu yang di-scan valid dan rolenya LEADERPI, guard langsung dibuka via
+`override-with-rfid` tanpa perlu logout/ganti sesi ke akun admin.
+
 Auth audit tetap lokal di `data/json_store/auth_audit.jsonl`, dan session auth
 memory-only sehingga login aktif akan reset saat backend restart.
 

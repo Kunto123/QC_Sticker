@@ -6,6 +6,7 @@ from backend.app.core.config import AppConfig
 from backend.app.core.device_runtime import DeviceRuntimeResolver
 from backend.app.repositories.auth_audit_repository import AuthAuditRepository
 from backend.app.core.security import TokenStore
+from backend.app.repositories.datapart_guard_repository import DatapartGuardRepository
 from backend.app.repositories.deployments_repository import DeploymentsRepository
 from backend.app.repositories.hybrid_inspection_results_repository import HybridInspectionResultsRepository
 from backend.app.repositories.inspection_results_repository import InspectionResultsRepository
@@ -20,9 +21,11 @@ from backend.app.repositories.users_repository import UsersRepository
 from backend.app.repositories.workstation_registry_repository import WorkstationRegistryRepository
 from backend.app.repositories.machine_settings_repository import MachineSettingsRepository
 from backend.app.services.model_export_service import ModelExportService
+from backend.app.services.datapart_guard_service import DatapartGuardService
 from backend.app.services.inspection_session import InspectionSessionService
 from backend.app.services.sticker_inference import StickerInferenceService
 from backend.app.services.template_runtime import TemplateRuntimeService
+from backend.app.workers.datapart_guard_worker import DatapartGuardWorker
 from backend.app.workers.push_worker import PushWorker
 from backend.app.services.plc_adapter import build_plc_adapter
 from backend.app.workers.plc_worker import PlcWorker
@@ -72,6 +75,9 @@ inspection_results_repo = HybridInspectionResultsRepository(
     inspection_sql_mirror_repo,
 )
 
+datapart_guard_repo = DatapartGuardRepository()
+datapart_guard_service = DatapartGuardService(datapart_guard_repo, inspection_sql_mirror_repo)
+
 token_store = TokenStore(ttl_seconds=app_config.access_token_ttl_seconds)
 
 template_runtime_service = TemplateRuntimeService(templates_repo, deployments_repo)
@@ -95,6 +101,7 @@ inspection_session_service = InspectionSessionService(
     app_config=app_config,
     plc_worker=plc_worker,
     reject_log_repo=reject_log_repo,
+    datapart_guard=datapart_guard_service,
 )
 workstation_registry_repo = WorkstationRegistryRepository()
 
@@ -141,3 +148,4 @@ push_worker = PushWorker(
     interval_seconds=int(app_config.push_worker_interval_seconds),
     max_retry_count=int(app_config.push_worker_max_retry),
 )
+datapart_guard_worker = DatapartGuardWorker(datapart_guard_service)
