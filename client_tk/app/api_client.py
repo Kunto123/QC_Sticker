@@ -272,6 +272,15 @@ class ApiClient:
     def manual_release(self, session_id: str) -> dict:
         return self._post(f"/inspection/sessions/{session_id}/release", {})
 
+    def start_box(self, session_id: str, raw_scan: str) -> dict:
+        return self._post(f"/inspection/sessions/{session_id}/box/datapart1", {"raw_scan": raw_scan})
+
+    def close_box(self, session_id: str, raw_scan: str) -> dict:
+        return self._post(f"/inspection/sessions/{session_id}/box/datapart2", {"raw_scan": raw_scan})
+
+    def abandon_box(self, session_id: str) -> dict:
+        return self._post(f"/inspection/sessions/{session_id}/box/abandon", {})
+
     def push_frame(self, session_id: str, image_b64: str, *, response_mode: str | None = None) -> dict:
         payload: dict[str, object] = {"image_b64": image_b64}
         if response_mode:

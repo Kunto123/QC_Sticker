@@ -117,6 +117,31 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(d1, d2, "second round-trip diverged from first")
 
 
+class BoxTrackingContractTest(unittest.TestCase):
+    def test_missing_box_tracking_defaults_disabled(self) -> None:
+        tpl = template_from_dict(_minimal_sticker_payload())
+        self.assertFalse(tpl.box_tracking.enabled)
+        self.assertEqual(tpl.box_tracking.min_age_hours, 0.0)
+
+    def test_box_tracking_roundtrip_preserves_values(self) -> None:
+        p = _minimal_sticker_payload()
+        p["box_tracking"] = {"enabled": True, "min_age_hours": 12.5}
+        d1 = template_from_dict(p).to_dict()
+        self.assertEqual(d1["box_tracking"], {"enabled": True, "min_age_hours": 12.5})
+        d2 = template_from_dict(d1).to_dict()
+        self.assertEqual(d1, d2)
+
+    def test_golden_fixture_predates_box_tracking_and_still_parses(self) -> None:
+        import json
+        from pathlib import Path
+
+        fixture_path = Path(__file__).parent / "fixtures" / "golden_template_sticker.json"
+        payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+        tpl = template_from_dict(payload)  # must not raise
+        self.assertFalse(tpl.box_tracking.enabled)
+        self.assertEqual(tpl.box_tracking.min_age_hours, 0.0)
+
+
 class ValidateStickerRuleTest(unittest.TestCase):
     def test_requires_expected_class(self) -> None:
         errors = validate_sticker_rule({})

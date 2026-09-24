@@ -77,6 +77,12 @@ class PersistenceConfig:
 
 
 @dataclass(slots=True)
+class BoxTrackingConfig:
+    enabled: bool = False
+    min_age_hours: float = 0.0
+
+
+@dataclass(slots=True)
 class InspectionTemplate:
     id: int | None
     version_id: int | None
@@ -91,6 +97,7 @@ class InspectionTemplate:
     part_ready: PartReadyConfig
     sticker: StickerRule
     persistence: PersistenceConfig
+    box_tracking: BoxTrackingConfig = field(default_factory=BoxTrackingConfig)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -112,6 +119,7 @@ class InspectionTemplate:
             "part_ready": asdict(self.part_ready),
             "sticker": asdict(self.sticker),
             "persistence": asdict(self.persistence),
+            "box_tracking": asdict(self.box_tracking),
             "metadata": dict(self.metadata),
         }
 
@@ -133,6 +141,7 @@ _VALID_PART_READY_FIELDS = set(PartReadyConfig.__slots__)
 _VALID_STICKER_FIELDS = set(StickerRule.__slots__)
 _VALID_VISION_FIELDS = set(VisionConfig.__slots__)
 _VALID_CAMERA_FIELDS = set(CameraDefaults.__slots__)
+_VALID_BOX_TRACKING_FIELDS = set(BoxTrackingConfig.__slots__)
 
 
 def template_from_dict(payload: dict[str, Any]) -> InspectionTemplate:
@@ -145,6 +154,7 @@ def template_from_dict(payload: dict[str, Any]) -> InspectionTemplate:
     _vision_filtered = {k: v for k, v in dict(payload.get("vision") or {}).items() if k in _VALID_VISION_FIELDS}
     _camera_filtered = {k: v for k, v in dict(payload.get("camera") or {}).items() if k in _VALID_CAMERA_FIELDS}
     _part_ready_filtered = {k: v for k, v in dict(payload.get("part_ready") or {}).items() if k in _VALID_PART_READY_FIELDS}
+    _box_tracking_filtered = {k: v for k, v in dict(payload.get("box_tracking") or {}).items() if k in _VALID_BOX_TRACKING_FIELDS}
     _method_raw = _part_ready_filtered.get("method")
     if _method_raw is None or str(_method_raw).strip() == "":
         _part_ready_filtered["method"] = "gap_template_match"
@@ -163,6 +173,7 @@ def template_from_dict(payload: dict[str, Any]) -> InspectionTemplate:
         part_ready=PartReadyConfig(**_part_ready_filtered),
         sticker=StickerRule(**_sticker_filtered),
         persistence=PersistenceConfig(**(payload.get("persistence") or {})),
+        box_tracking=BoxTrackingConfig(**_box_tracking_filtered),
         metadata=dict(payload.get("metadata") or {}),
     )
 

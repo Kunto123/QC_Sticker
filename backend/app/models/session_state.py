@@ -18,6 +18,12 @@ class SessionState:
     status: SessionStatus = SessionStatus.IDLE
     line_id: str | None = None
     station_id: str | None = None
+    # Box-tracking pointer (in-memory only, like the rest of SessionState — the
+    # box's actual progress lives durably in PI_BoxLuggage itself; a restart
+    # loses this pointer but not the box data. See box_tracking_service.py.
+    box_datapart_pi: str | None = None
+    box_qty_goal: int = 0
+    box_qty_remaining: int = 0
     part_ready_roi_override: dict[str, Any] = field(default_factory=dict)
     sticker_roi_override: dict[str, Any] = field(default_factory=dict)
     latest_result: dict[str, Any] | None = None

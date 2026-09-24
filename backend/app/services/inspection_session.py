@@ -19,6 +19,7 @@ from backend.app.core.json_safety import to_jsonable
 from backend.app.models.session_state import SessionState
 from backend.app.repositories.inspection_results_repository import InspectionResultsRepository
 from backend.app.repositories.reject_log_repository import RejectLogRepository
+from backend.app.services.box_tracking_service import BoxTrackingError
 from backend.app.services.operator_state_machine import OperatorInspectionStateMachine
 from backend.app.services.sticker_inference import StickerInferenceService
 from backend.app.services.template_runtime import TemplateRuntimeService
@@ -83,6 +84,7 @@ class InspectionSessionService:
         app_config: AppConfig | None = None,
         plc_worker=None,
         reject_log_repo: RejectLogRepository | None = None,
+        box_tracking_service=None,
     ) -> None:
         self._template_runtime = template_runtime
         self._results_repo = results_repo
@@ -132,6 +134,7 @@ class InspectionSessionService:
         )
         self._plc_worker = plc_worker
         self._reject_log_repo = reject_log_repo
+        self._box_tracking_service = box_tracking_service
         self._operator_state_machine = OperatorInspectionStateMachine()
         self._max_consecutive_rejects: int = (
             max(0, int(app_config.max_consecutive_rejects))
@@ -551,6 +554,41 @@ class InspectionSessionService:
             state.part_ready_ratio_history.clear()
             state.part_ready_ema_ratio = -1.0
         return self._session_payload(state)
+
+    def start_box(self, session_id: str, raw_scan: str, username: str) -> dict[str, Any]:
+        """Datapart 1 scan: open a box for this session's template. Raises
+        BoxTrackingError (age gate / not found / bad scan) or ValueError
+        (unknown session_id) — both caught at the route layer."""
+        state = self._require_session(session_id)
+        if self._box_tracking_service is None or not state.template.box_tracking.enabled:
+            raise BoxTrackingError("DISABLED", "Box tracking is not enabled for this template.")
+        result = self._box_tracking_service.start_box(template=state.template, raw_scan=raw_scan, username=username)
+        state.box_datapart_pi = result["datapart_pi"]
+        state.box_qty_goal = result["qty_goal"]
+        state.box_qty_remaining = result["qty_remaining"]
+        return result
+
+    def close_box(self, session_id: str, raw_scan2: str) -> dict[str, Any]:
+        """Datapart 2 scan: cross-check and close the session's open box."""
+        state = self._require_session(session_id)
+        if self._box_tracking_service is None or not state.box_datapart_pi:
+            raise BoxTrackingError("NOT_FOUND", "No open box for this session.")
+        result = self._box_tracking_service.close_box(datapart_pi=state.box_datapart_pi, raw_scan2=raw_scan2)
+        state.box_datapart_pi = None
+        state.box_qty_goal = 0
+        state.box_qty_remaining = 0
+        return result
+
+    def abandon_box(self, session_id: str) -> dict[str, Any]:
+        """LEADERPI override: force-close a stuck box (Datapart 2 can never match)."""
+        state = self._require_session(session_id)
+        if self._box_tracking_service is None or not state.box_datapart_pi:
+            raise BoxTrackingError("NOT_FOUND", "No open box for this session.")
+        result = self._box_tracking_service.abandon_box(datapart_pi=state.box_datapart_pi)
+        state.box_datapart_pi = None
+        state.box_qty_goal = 0
+        state.box_qty_remaining = 0
+        return result
 
     def get_latest_preview(self) -> dict[str, Any] | None:
         with self._lock:
@@ -1675,6 +1713,9 @@ class InspectionSessionService:
             "part_ready_roi": part_ready_roi,
             "sticker_roi": sticker_roi,
             "roi": sticker_roi,
+            "box_tracking_enabled": state.template.box_tracking.enabled,
+            "box_qty_goal": state.box_qty_goal,
+            "box_qty_remaining": state.box_qty_remaining,
         }
 
     @staticmethod
@@ -1695,6 +1736,8 @@ class InspectionSessionService:
             "session_accept": state.session_accept,
             "session_reject": state.session_reject,
             "session_reject_breakdown": breakdown,
+            "box_qty_goal": state.box_qty_goal,
+            "box_qty_remaining": state.box_qty_remaining,
         }
 
     def _crop_stage_roi(self, frame, base_roi: RoiGeometry, override: dict[str, Any]):
@@ -2578,4 +2621,16 @@ class InspectionSessionService:
         )
         state.last_persisted_at = datetime.now(UTC)
         state.last_persisted_key = persist_key
+        if self._box_tracking_service is not None and state.template.box_tracking.enabled and state.box_datapart_pi:
+            try:
+                box_row = self._box_tracking_service.record_ok(
+                    datapart_pi=state.box_datapart_pi,
+                    part_ready_ratio=validation.get("data1") or 0.0,
+                    sticker_confidence=validation.get("data2") or 0.0,
+                    mp_check=validation.get("mp_check"),
+                )
+                if box_row is not None:
+                    state.box_qty_remaining = max(0, state.box_qty_remaining - 1)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[box_tracking] record_ok failed: %s", exc, exc_info=True)
         return {"written": True, "result_id": record["id"]}

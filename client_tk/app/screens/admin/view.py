@@ -156,6 +156,8 @@ class AdminScreen(ctk.CTkFrame):
         self.preset_runtime_var = tk.StringVar(value="auto")
         self.preset_conf_threshold_var = tk.StringVar(value="0.25")
         self.preset_expected_class_var = tk.StringVar()
+        self.preset_box_tracking_enabled_var = tk.BooleanVar(value=False)
+        self.preset_box_tracking_min_age_hours_var = tk.StringVar(value="0")
         self.preset_gap_threshold_var = tk.StringVar(value="0.85")
         self.preset_camera_index_var = tk.StringVar(value="0")
         self.preset_roi_choice_var = tk.StringVar(value="Sticker ROI")
@@ -777,6 +779,8 @@ class AdminScreen(ctk.CTkFrame):
         "preset_runtime_var": "auto",
         "preset_conf_threshold_var": "0.25",
         "preset_expected_class_var": "",
+        "preset_box_tracking_enabled_var": False,
+        "preset_box_tracking_min_age_hours_var": "0",
         "preset_gap_threshold_var": "0.85",
         "preset_canny_low_var": "",
         "preset_canny_high_var": "",
@@ -922,6 +926,9 @@ class AdminScreen(ctk.CTkFrame):
         sticker = detail.get("sticker") or {}
         part_ready = detail.get("part_ready") or {}
         self.preset_expected_class_var.set(str(sticker.get("expected_class") or ""))
+        box_tracking = detail.get("box_tracking") or {}
+        self.preset_box_tracking_enabled_var.set(bool(box_tracking.get("enabled", False)))
+        self.preset_box_tracking_min_age_hours_var.set(str(box_tracking.get("min_age_hours", 0.0)))
         self.preset_gap_threshold_var.set(str(part_ready.get("gap_match_threshold", 0.85)))
         self.preset_canny_low_var.set("" if part_ready.get("canny_low") is None else str(part_ready.get("canny_low")))
         self.preset_canny_high_var.set("" if part_ready.get("canny_high") is None else str(part_ready.get("canny_high")))
@@ -1474,6 +1481,10 @@ class AdminScreen(ctk.CTkFrame):
                 "part_ready_settle_ms": None,
             },
             "persistence": {"write_to_db": True},
+            "box_tracking": {
+                "enabled": bool(self.preset_box_tracking_enabled_var.get()),
+                "min_age_hours": _float_or_default(self.preset_box_tracking_min_age_hours_var.get(), 0.0),
+            },
             "metadata": {"preset_ui": "admin_simple"},
         }
 

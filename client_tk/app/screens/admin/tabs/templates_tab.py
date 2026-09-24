@@ -138,6 +138,18 @@ class TemplatesTab:
 
         a._entry(wizard, 9, 0, "Expected Class", a.preset_expected_class_var, columnspan=3)
 
+        # Box-level datapart traceability (PI_BoxLuggage / PI_OkDataPart).
+        # Disabled by default — every other template is untouched.
+        box_tracking_row = ttk.Frame(wizard)
+        box_tracking_row.grid(row=10, column=0, columnspan=4, sticky="ew", padx=(12, 12), pady=5)
+        ttk.Checkbutton(
+            box_tracking_row,
+            text="Enable box-level datapart traceability",
+            variable=a.preset_box_tracking_enabled_var,
+        ).pack(side="left", padx=(0, 12))
+        ttk.Label(box_tracking_row, text="Min. part age (hours)").pack(side="left", padx=(0, 4))
+        ttk.Entry(box_tracking_row, textvariable=a.preset_box_tracking_min_age_hours_var, width=6).pack(side="left")
+
         a._entry(wizard, 11, 0, "Gap Threshold (0-1)", a.preset_gap_threshold_var, columnspan=2)
         # Track gap threshold widgets for show/hide based on method (row 13 added below)
         a._gap_threshold_widgets = []

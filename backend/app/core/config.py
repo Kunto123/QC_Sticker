@@ -87,6 +87,37 @@ class AppConfig:
     operator_col_member_id: str = _sql_identifier("QC_SUITE_OPERATOR_COL_MEMBER_ID", "Member_ID")
     operator_col_status: str = _sql_identifier("QC_SUITE_OPERATOR_COL_STATUS", "StatusMP")
 
+    # External "PI_BoxLuggage" / "PI_OkDataPart" tables (owned by the plant MES,
+    # not this app) that back box-level datapart traceability. Never
+    # created/altered by this app — both must already exist. Default table
+    # names are lowercase because the reference DDL declares them with an
+    # UNQUOTED identifier ("CREATE TABLE PI_BoxLuggage (...)"), which
+    # PostgreSQL folds to lowercase; the column names in that DDL are
+    # double-quoted (case-preserving), so those defaults keep the given case.
+    boxluggage_table: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_TABLE", "pi_boxluggage")
+    boxluggage_col_no: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_NO", "No")
+    boxluggage_col_part_name: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_PART_NAME", "PartName")
+    boxluggage_col_date_check_mc: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_DATE_CHECK_MC", "DateCheckMC")
+    boxluggage_col_mp_check: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_MP_CHECK", "MPCheck")
+    boxluggage_col_date_send_db: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_DATE_SEND_DB", "DateSendDB")
+    boxluggage_col_datapart_id: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_DATAPART_ID", "DatapartID")
+    boxluggage_col_datapart_date: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_DATAPART_DATE", "DatapartDate")
+    boxluggage_col_mpid_datapart: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_MPID_DATAPART", "MPIDDataPart")
+    boxluggage_col_data1: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_DATA1", "Data1")
+    boxluggage_col_data2: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_DATA2", "Data2")
+    boxluggage_col_line: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_LINE", "Line")
+    boxluggage_col_datapart_pi: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_DATAPART_PI", "DatapartPI")
+    boxluggage_col_datapart_pi_date: str = _sql_identifier("QC_SUITE_BOXLUGGAGE_COL_DATAPART_PI_DATE", "DatapartPIDate")
+    okdatapart_table: str = _sql_identifier("QC_SUITE_OKDATAPART_TABLE", "pi_okdatapart")
+    okdatapart_col_no: str = _sql_identifier("QC_SUITE_OKDATAPART_COL_NO", "No")
+    okdatapart_col_nama_part: str = _sql_identifier("QC_SUITE_OKDATAPART_COL_NAMA_PART", "NamaPart")
+    okdatapart_col_prod_date: str = _sql_identifier("QC_SUITE_OKDATAPART_COL_PROD_DATE", "ProdDate")
+    okdatapart_col_id_data_part: str = _sql_identifier("QC_SUITE_OKDATAPART_COL_ID_DATA_PART", "IDDataPart")
+    okdatapart_col_qty_box: str = _sql_identifier("QC_SUITE_OKDATAPART_COL_QTY_BOX", "QtyBox")
+    okdatapart_col_mpid: str = _sql_identifier("QC_SUITE_OKDATAPART_COL_MPID", "MPID")
+    okdatapart_col_mcid: str = _sql_identifier("QC_SUITE_OKDATAPART_COL_MCID", "MCID")
+    okdatapart_col_station: str = _sql_identifier("QC_SUITE_OKDATAPART_COL_STATION", "Station")
+
     # ── Fixed constants exposed on the instance (services read them here) ──
     access_token_ttl_seconds: int = ACCESS_TOKEN_TTL_SECONDS
     push_worker_interval_seconds: int = PUSH_WORKER_INTERVAL_SECONDS

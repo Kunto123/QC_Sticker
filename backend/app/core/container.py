@@ -13,10 +13,17 @@ from backend.app.repositories.models_repository import ModelsRepository
 from backend.app.repositories.reject_log_repository import RejectLogRepository
 from backend.app.repositories.postgres.inspection_mirror_repository import PostgresInspectionMirrorRepository
 from backend.app.repositories.postgres.users_repository import PostgresUsersRepository
+from backend.app.repositories.postgres.box_luggage_repository import PostgresBoxLuggageRepository
+from backend.app.repositories.postgres.ok_data_part_repository import PostgresOkDataPartRepository
 from backend.app.repositories.sqlserver.inspection_mirror_repository import SqlServerInspectionMirrorRepository
 from backend.app.repositories.sqlserver.users_repository import SqlServerUsersRepository
+from backend.app.repositories.sqlserver.box_luggage_repository import SqlServerBoxLuggageRepository
+from backend.app.repositories.sqlserver.ok_data_part_repository import SqlServerOkDataPartRepository
 from backend.app.repositories.templates_repository import TemplatesRepository
 from backend.app.repositories.users_repository import UsersRepository
+from backend.app.repositories.box_luggage_repository import BoxLuggageRepository
+from backend.app.repositories.ok_data_part_repository import OkDataPartRepository
+from backend.app.services.box_tracking_service import BoxTrackingService
 from backend.app.repositories.workstation_registry_repository import WorkstationRegistryRepository
 from backend.app.repositories.machine_settings_repository import MachineSettingsRepository
 from backend.app.services.model_export_service import ModelExportService
@@ -48,6 +55,21 @@ users_repo = (
     if database_backend == "sqlserver"
     else UsersRepository()
 )
+box_luggage_repo = (
+    PostgresBoxLuggageRepository(app_config)
+    if database_backend == "postgresql"
+    else SqlServerBoxLuggageRepository(app_config)
+    if database_backend == "sqlserver"
+    else BoxLuggageRepository()
+)
+ok_data_part_repo = (
+    PostgresOkDataPartRepository(app_config)
+    if database_backend == "postgresql"
+    else SqlServerOkDataPartRepository(app_config)
+    if database_backend == "sqlserver"
+    else OkDataPartRepository()
+)
+box_tracking_service = BoxTrackingService(box_luggage_repo, ok_data_part_repo, app_config, machine_settings)
 audit_repo = AuthAuditRepository()
 templates_repo = TemplatesRepository(
     default_model_path=app_config.default_sticker_model_path,
@@ -95,6 +117,7 @@ inspection_session_service = InspectionSessionService(
     app_config=app_config,
     plc_worker=plc_worker,
     reject_log_repo=reject_log_repo,
+    box_tracking_service=box_tracking_service,
 )
 workstation_registry_repo = WorkstationRegistryRepository()
 

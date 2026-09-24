@@ -10,6 +10,7 @@ from flask import Blueprint, Response, g, jsonify, request
 from backend.app.core.container import audit_repo, inspection_results_repo, inspection_session_service, plc_worker, reject_log_repo
 from backend.app.core.json_safety import safe_jsonify
 from backend.app.core.http import require_auth, require_roles
+from backend.app.services.box_tracking_service import BoxTrackingError
 from shared.contracts.enums import DecisionCode, RejectReasonCode, UserRole
 
 
@@ -87,6 +88,53 @@ def update_roi(session_id: str):
 def stop_session(session_id: str):
     try:
         result = inspection_session_service.stop_session(session_id)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(result)
+
+
+def _box_tracking_error_status(exc: BoxTrackingError) -> int:
+    return 404 if exc.code == "NOT_FOUND" else 422
+
+
+@inspection_blueprint.post("/inspection/sessions/<session_id>/box/datapart1")
+@require_auth
+def box_datapart1(session_id: str):
+    """Datapart 1 scan: age-gate then open a box for this session's template."""
+    payload = request.get_json(force=True) or {}
+    raw_scan = str(payload.get("raw_scan") or "").strip()
+    try:
+        result = inspection_session_service.start_box(session_id, raw_scan, g.current_user.username)
+    except BoxTrackingError as exc:
+        return jsonify({"error": str(exc), "code": exc.code}), _box_tracking_error_status(exc)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(result), 201
+
+
+@inspection_blueprint.post("/inspection/sessions/<session_id>/box/datapart2")
+@require_auth
+def box_datapart2(session_id: str):
+    """Datapart 2 scan: cross-check and close the session's open box."""
+    payload = request.get_json(force=True) or {}
+    raw_scan = str(payload.get("raw_scan") or "").strip()
+    try:
+        result = inspection_session_service.close_box(session_id, raw_scan)
+    except BoxTrackingError as exc:
+        return jsonify({"error": str(exc), "code": exc.code}), _box_tracking_error_status(exc)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    return jsonify(result)
+
+
+@inspection_blueprint.post("/inspection/sessions/<session_id>/box/abandon")
+@require_roles(UserRole.ADMIN)
+def box_abandon(session_id: str):
+    """LEADERPI override: force-close a stuck box (Datapart 2 can never match)."""
+    try:
+        result = inspection_session_service.abandon_box(session_id)
+    except BoxTrackingError as exc:
+        return jsonify({"error": str(exc), "code": exc.code}), _box_tracking_error_status(exc)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 404
     return jsonify(result)

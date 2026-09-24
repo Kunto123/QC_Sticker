@@ -279,6 +279,16 @@ class OperatorScreen(ctk.CTkFrame):
         )
         self.plc_status_label.pack(anchor="w", padx=12, pady=(0, 10))
 
+        self.box_status_label = ctk.CTkLabel(
+            self.decision_status_frame,
+            text="",
+            font=("Segoe UI", 10, "bold"),
+            text_color=TEXT_SECONDARY,
+            wraplength=320,
+            justify="left",
+        )
+        self.box_status_label.pack(anchor="w", padx=12, pady=(0, 10))
+
         # Camera status label
         self.camera_status_label = ctk.CTkLabel(
             self.decision_status_frame,
@@ -471,6 +481,18 @@ class OperatorScreen(ctk.CTkFrame):
         self.template_selector.configure(values=values)
         self._sync_template_selector()
 
+    def _template_requires_box_tracking(self) -> bool:
+        """True if the currently selected template version has box tracking
+        enabled — camera/inference must stay off until Datapart 1 is scanned."""
+        template_version_id = int(self.template_version_value.get() or 0)
+        if not template_version_id:
+            return False
+        try:
+            detail = self._fetch_template_version_detail(template_version_id)
+        except Exception:  # noqa: BLE001
+            return False
+        return bool((detail.get("box_tracking") or {}).get("enabled"))
+
     def _auto_start_first_template(self) -> None:
         if self._closed or self._auto_start_done:
             return
@@ -483,6 +505,10 @@ class OperatorScreen(ctk.CTkFrame):
         self.template_choice.set(first_label)
         self.info_var.set("Auto start: memilih template pertama.")
         self._on_template_selected()
+        if self._template_requires_box_tracking():
+            self.info_var.set("Auto start: box tracking aktif — scan Datapart 1 wajib sebelum kamera menyala.")
+            self._start_session()
+            return
         if not self._start_camera(show_errors=False):
             self.info_var.set("Auto start: kamera gagal dibuka. Start Camera bisa dilakukan manual.")
             return
@@ -1314,6 +1340,27 @@ class OperatorScreen(ctk.CTkFrame):
         for _lbl in self.breakdown_labels.values():
             _lbl.configure(text="0")
         self.recent_list.delete(0, "end")
+        self._refresh_context_summary()
+        self._update_status_badges()
+
+        if payload.get("box_tracking_enabled"):
+            # Mandatory Datapart 1 scan gate: camera and inference stay OFF
+            # until the scan succeeds — nothing to inspect until a box is open.
+            self.main_view.reset()
+            self.decision_banner.configure(fg_color="#334155", text_color="#f8fafc", text="MENUNGGU SCAN DATAPART 1")
+            self.decision_subtitle.configure(text="Kamera & inferensi menunggu scan Datapart 1.")
+            self.info_var.set("Box tracking aktif: scan Datapart 1 wajib sebelum kamera menyala.")
+            self.after(200, self._prompt_datapart1_scan)
+            return
+
+        self._activate_camera_and_inference(payload["session_id"])
+
+    def _activate_camera_and_inference(self, session_id: str) -> None:
+        """Start the camera feed and the inference loop. For box-tracking
+        templates this is deferred until after the mandatory Datapart 1 scan
+        succeeds; for every other template it runs immediately on session start."""
+        if self.capture.get_latest_frame() is None and not self._start_camera(show_errors=False):
+            self.info_var.set("Kamera gagal dinyalakan — sesi berjalan tanpa gambar. Coba Start Camera manual.")
         _current_frame = self.capture.get_latest_frame()
         if _current_frame is not None:
             self._show_cached_overlay_or_frame(_current_frame)
@@ -1322,7 +1369,7 @@ class OperatorScreen(ctk.CTkFrame):
         self._inference_running = True
         self._inference_thread = threading.Thread(
             target=self._inference_loop,
-            args=(payload["session_id"],),
+            args=(session_id,),
             name="qc-inference",
             daemon=True,
         )
@@ -1331,19 +1378,154 @@ class OperatorScreen(ctk.CTkFrame):
         infer_fps_actual = round(1000.0 / upload_interval_ms, 1)
         preview_fps_actual = round(1000.0 / self._preview_interval_ms, 1)
         self.info_var.set(
-            f"Session running: {payload['session_id']} "
+            f"Session running: {session_id} "
             f"(inference @ {upload_interval_ms}ms / {infer_fps_actual} fps | preview @ {preview_fps_actual} fps)"
         )
-        self._refresh_context_summary()
-        self._update_status_badges()
+
+    # -----------------------------------------------------------------
+    # Box-level datapart traceability (Datapart 1 / Datapart 2 scans)
+    # -----------------------------------------------------------------
+
+    def _is_leaderpi(self) -> bool:
+        return str((self.state.user or {}).get("role") or "").strip().upper() == "LEADERPI"
+
+    def _show_scan_popup(self, title: str, instruction: str, on_submit, *, on_abandon=None) -> None:
+        """Non-modal keyboard-wedge scan popup. Stays open (with a status
+        message) if on_submit raises; caller destroys it on success.
+
+        on_abandon (LEADERPI-only override for a box that can never be
+        closed, e.g. a lost/damaged tag) is offered as a button when set
+        and the current user is LEADERPI.
+        """
+        popup = ctk.CTkToplevel(self)
+        popup.title(title)
+        popup.geometry("420x220")
+        popup.attributes("-topmost", True)
+        popup.resizable(False, False)
+        # Mandatory scan: block the window-manager close button/Alt+F4 and grab
+        # all input so the popup can't be dismissed or worked around — the only
+        # way out is a successful scan (or, on Datapart 2, the LEADERPI abandon
+        # button below).
+        popup.protocol("WM_DELETE_WINDOW", lambda: None)
+        popup.transient(self.winfo_toplevel())
+        popup.update_idletasks()
+        popup.grab_set()
+        ctk.CTkLabel(popup, text=instruction, font=("Segoe UI", 11), wraplength=380, justify="left").pack(
+            padx=16, pady=(16, 8)
+        )
+        scan_var = tk.StringVar()
+        entry = ctk.CTkEntry(popup, textvariable=scan_var, width=380)
+        entry.pack(padx=16, pady=8)
+        status_label = ctk.CTkLabel(popup, text="", text_color="#dc2626", wraplength=380, justify="left")
+        status_label.pack(padx=16, pady=(0, 8))
+
+        def _submit(_event=None) -> None:
+            raw_scan = scan_var.get().strip()
+            scan_var.set("")
+            if not raw_scan:
+                return
+            try:
+                on_submit(raw_scan)
+            except Exception as exc:  # noqa: BLE001
+                try:
+                    status_label.configure(text=str(exc))
+                    entry.focus_set()
+                except tk.TclError:
+                    pass
+                return
+            try:
+                popup.destroy()
+            except tk.TclError:
+                pass
+
+        entry.bind("<Return>", _submit)
+        popup.after(50, entry.focus_set)
+
+        if on_abandon is not None and self._is_leaderpi():
+            def _abandon() -> None:
+                if not messagebox.askyesno("Abandon box", "Force-close this box without a valid Datapart 2 match?"):
+                    return
+                try:
+                    on_abandon()
+                except Exception as exc:  # noqa: BLE001
+                    status_label.configure(text=str(exc))
+                    return
+                try:
+                    popup.destroy()
+                except tk.TclError:
+                    pass
+
+            ctk.CTkButton(
+                popup, text="Abandon box (LEADERPI)", fg_color="#7f1d1d", hover_color="#991b1b", command=_abandon
+            ).pack(padx=16, pady=(4, 12))
+
+    def _prompt_datapart1_scan(self) -> None:
+        if not self.state.active_session:
+            return
+        session_id = self.state.active_session["session_id"]
+
+        def _submit(raw_scan: str) -> None:
+            result = self.api.start_box(session_id, raw_scan)
+            self.state.active_session["box_qty_goal"] = result.get("qty_goal")
+            self.state.active_session["box_qty_remaining"] = result.get("qty_remaining")
+            self._set_box_status_text(f"Box: 0 of {result.get('qty_goal')} OK")
+            self._activate_camera_and_inference(session_id)
+
+        self._show_scan_popup(
+            "SCAN DATAPART 1",
+            "Scan the box's first datapart tag to open it and start tracking OK count.",
+            _submit,
+        )
+
+    def _prompt_datapart2_scan(self) -> None:
+        if not self.state.active_session:
+            return
+        session_id = self.state.active_session["session_id"]
+
+        def _submit(raw_scan: str) -> None:
+            self.api.close_box(session_id, raw_scan)
+            self._set_box_status_text("")
+
+        def _abandon() -> None:
+            self.api.abandon_box(session_id)
+            self._set_box_status_text("")
+
+        self._show_scan_popup(
+            "SCAN DATAPART 2",
+            "Goal reached — scan the box's second datapart tag to close it out.",
+            _submit,
+            on_abandon=_abandon,
+        )
+
+    def _set_box_status_text(self, text: str) -> None:
+        try:
+            self.box_status_label.configure(text=text)
+        except tk.TclError:
+            pass
+
+    def _update_box_indicator(self, payload: dict) -> None:
+        counters = payload.get("counters") or {}
+        qty_goal = counters.get("box_qty_goal") or 0
+        qty_remaining = counters.get("box_qty_remaining") or 0
+        if not qty_goal:
+            return
+        qty_done = qty_goal - qty_remaining
+        self._set_box_status_text(f"Box: {qty_done} of {qty_goal} OK")
+        if qty_remaining == 0 and getattr(self, "_last_box_qty_remaining", None) != 0:
+            self.after(200, self._prompt_datapart2_scan)
+        self._last_box_qty_remaining = qty_remaining
 
     def _start_production(self) -> None:
         if not self.template_version_value.get().strip():
             self._auto_start_first_template()
-        if self.capture.get_latest_frame() is None and not self._start_camera():
-            return
         if self.state.active_session:
             self.info_var.set("Production inspection is already running.")
+            return
+        if self._template_requires_box_tracking():
+            # Camera stays off until the mandatory Datapart 1 scan succeeds.
+            self._start_session()
+            return
+        if self.capture.get_latest_frame() is None and not self._start_camera():
             return
         self._start_session()
 
@@ -1629,6 +1811,7 @@ class OperatorScreen(ctk.CTkFrame):
             self._update_status_badges(payload)
             self._update_result_info(payload)
             self._render_overlay_direct(payload)
+            self._update_box_indicator(payload)
 
         except tk.TclError:
             pass
