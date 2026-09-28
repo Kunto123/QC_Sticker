@@ -220,24 +220,6 @@ ada duluan di DB:
   ketemu), dan `Line` diringkas jadi karakter terakhir dari `identity.line`
   (mis. `"GB3"` → `"3"`).
 
-**Datapart guard** (`QC_SUITE_INSPECTION_COL_DATAPART_ID`, default `DatapartID`,
-read-only — tidak pernah ditulis app ini): tiap 5 judgement ACCEPT yang sukses
-push ke SQL, judgement berikutnya otomatis dikunci sampai kolom `DatapartID`
-kelima baris itu terisi oleh sistem MES lain. `GET /datapart-guard/status`
-untuk cek status. Dua cara buka paksa kalau downstream macet lama:
-`POST /datapart-guard/override` (perlu sesi login admin), atau
-`POST /datapart-guard/override-with-rfid` (body `{"rfid_uid": ...}`, dipakai
-popup di client — sesi operator sendiri boleh dipakai, otorisasinya dari kartu
-RFID yang di-scan, bukan dari role sesi yang login).
-
-Di client operator: begitu terkunci, kamera otomatis berhenti dan muncul popup
-peringatan "scan DATAPART". Client polling `GET /datapart-guard/status` tiap
-3 detik (independen dari frame loop, tetap jalan meski kamera mati) — begitu
-`DatapartID` terisi, popup otomatis hilang dan kamera restart sendiri. Popup
-juga punya tombol "Bypass (RFID LEADERPI)" yang membuka form scan kartu; kalau
-kartu yang di-scan valid dan rolenya LEADERPI, guard langsung dibuka via
-`override-with-rfid` tanpa perlu logout/ganti sesi ke akun admin.
-
 Auth audit tetap lokal di `data/json_store/auth_audit.jsonl`, dan session auth
 memory-only sehingga login aktif akan reset saat backend restart.
 

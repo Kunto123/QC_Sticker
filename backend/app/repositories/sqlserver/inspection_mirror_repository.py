@@ -56,7 +56,6 @@ class SqlServerInspectionMirrorRepository:
         self._config = config
         self._table = _quote_ident(config.inspection_push_table)
         self._col_id = _quote_ident(config.inspection_push_col_id)
-        self._col_datapart_id = _quote_ident(config.inspection_push_col_datapart_id)
         # Each logical field may map to more than one physical column (a
         # target table that duplicates the same value across redundant
         # columns) — every column in the list gets the same value on insert.
@@ -146,26 +145,6 @@ class SqlServerInspectionMirrorRepository:
             inserted_id = int(cursor.fetchone()[0])
             conn.commit()
         return {"id": inserted_id, **record}
-
-    def unfilled_datapart_ids(self, mirror_ids: list[int]) -> list[int]:
-        """Read-only: which of `mirror_ids` still have an empty DatapartID
-        column — i.e. the downstream MES hasn't confirmed them yet. Used by
-        the datapart guard; never writes to this table."""
-        if not mirror_ids:
-            return []
-        placeholders_sql = ", ".join(["?"] * len(mirror_ids))
-        with self._connect() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                f"""
-                SELECT {self._col_id} FROM {self._table}
-                WHERE {self._col_id} IN ({placeholders_sql})
-                AND ({self._col_datapart_id} IS NULL OR CAST({self._col_datapart_id} AS VARCHAR(64)) = '')
-                """,
-                *[int(v) for v in mirror_ids],
-            )
-            rows = cursor.fetchall()
-        return [int(row[0]) for row in rows]
 
     def delete_result(self, mirror_id: int) -> bool:
         with self._connect() as conn:

@@ -83,12 +83,10 @@ class InspectionSessionService:
         app_config: AppConfig | None = None,
         plc_worker=None,
         reject_log_repo: RejectLogRepository | None = None,
-        datapart_guard=None,
     ) -> None:
         self._template_runtime = template_runtime
         self._results_repo = results_repo
         self._sticker_inference = sticker_inference
-        self._datapart_guard = datapart_guard
         self._sessions: dict[str, SessionState] = {}
         self._lock = threading.RLock()
         self._accept_holdover_ms: int = (
@@ -1420,29 +1418,12 @@ class InspectionSessionService:
             _policy_action = "low_confidence_pending"
             _pending_reason = "part_ready_below_min_confidence"
 
-        # ── Item 3: datapart guard ──
-        # Every DATAPART_GUARD_BATCH_SIZE accepted judgements pushed to the
-        # SQL mirror, block further commits (accept AND reject) until the
-        # downstream MES has filled DatapartID for all of them. Cheap
-        # in-memory check — the actual DB poll happens on DatapartGuardWorker's
-        # background thread, not here. Computed unconditionally (not gated
-        # behind _commit_allowed) so the client learns about the lock on the
-        # very next frame — not only once a new part happens to reach commit
-        # stability, which could be a long, indefinite wait with no part in
-        # view.
-        _datapart_guard_locked = self._datapart_guard is not None and self._datapart_guard.is_locked()
-        if _commit_allowed and _datapart_guard_locked:
-            _commit_allowed = False
-            _policy_action = "datapart_guard_locked"
-            _pending_reason = "datapart_id_not_confirmed"
-
         # Build inspection_policy response
         inspection_policy = {
             "action": _policy_action,
             "commit_allowed": _commit_allowed,
             "hard_reject": _is_hard_reject,
             "plc_fault": _plc_fault,
-            "datapart_guard_locked": _datapart_guard_locked,
             "pending_reason": _pending_reason,
             "stable_elapsed_ms": round(_stable_elapsed_ms, 1),
             "stable_frames": state.policy_stable_frames,
@@ -2622,9 +2603,4 @@ class InspectionSessionService:
         )
         state.last_persisted_at = datetime.now(UTC)
         state.last_persisted_key = persist_key
-        if self._datapart_guard is not None and record.get("push_status") == "sent":
-            try:
-                self._datapart_guard.record_pushed(record.get("sql_mirror_id"))
-            except Exception as exc:  # noqa: BLE001
-                logger.error("[inspection] datapart guard record_pushed failed: %s", exc)
         return {"written": True, "result_id": record["id"]}

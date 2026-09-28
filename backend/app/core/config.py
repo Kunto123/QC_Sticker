@@ -137,13 +137,6 @@ class AppConfig:
     inspection_push_col_line: list[str] = field(
         default_factory=lambda: _sql_identifier_list("QC_SUITE_INSPECTION_COL_LINE", "Line")
     )
-    # Read-only column on the same push table — filled by a downstream MES
-    # process sometime after our insert, never by this app. The datapart
-    # guard (services/datapart_guard_service.py) polls it to decide whether
-    # a locked batch of accepted judgements can be released.
-    inspection_push_col_datapart_id: str = _sql_identifier(
-        "QC_SUITE_INSPECTION_COL_DATAPART_ID", "DatapartID"
-    )
 
     # ── Fixed constants exposed on the instance (services read them here) ──
     access_token_ttl_seconds: int = ACCESS_TOKEN_TTL_SECONDS
