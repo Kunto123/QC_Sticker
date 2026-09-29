@@ -193,6 +193,7 @@ class QcSuiteDesktopApp(ctk.CTk):
         self.geometry("1440x900")
         self.minsize(1160, 720)
         self.resizable(True, True)
+        self.state("zoomed")  # buka maximized saat pertama kali dijalankan; window tetap bisa di-restore/resize/snap manual
         self.configure(fg_color=APP_BG)
 
         style = ttk.Style(self)
