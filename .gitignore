@@ -29,6 +29,10 @@ guidebook/
 coverage/
 htmlcov/
 .tmp-local-only-test/
+HANDOFF.md
+TESTING.md
+deploy\client-packaging.md
+deploy\windows-service-backend.md
 
 # Build / packaging artifacts
 build/

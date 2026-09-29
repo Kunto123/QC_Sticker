@@ -193,8 +193,14 @@ class QcSuiteDesktopApp(ctk.CTk):
         self.geometry("1440x900")
         self.minsize(1160, 720)
         self.resizable(True, True)
-        self.state("zoomed")  # buka maximized saat pertama kali dijalankan; window tetap bisa di-restore/resize/snap manual
         self.configure(fg_color=APP_BG)
+        # CustomTkinter/Tk mengabaikan state("zoomed") kalau dipanggil sebelum window
+        # benar-benar ter-map oleh window manager. update_idletasks() memaksa Tk
+        # memproses geometry pending lebih dulu; after(...) jadi fallback kalau window
+        # manager masih belum siap saat itu juga (mis. saat startup lambat).
+        self.update_idletasks()
+        self.state("zoomed")
+        self.after(150, lambda: self.state("zoomed"))
 
         style = ttk.Style(self)
         configure_ttk_navy_theme(style)
