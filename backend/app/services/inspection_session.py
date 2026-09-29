@@ -900,6 +900,7 @@ class InspectionSessionService:
                 state.part_ready_latched = False
                 state.part_ready_latched_at = None
                 state.part_ready_unsettled_at = None
+                state.part_ready_settled_at = None  # part dianggap hilang — reset timer timeout NG untuk episode berikutnya
                 self._reset_clamp_gate(state)
         elif state.part_ready_latched and presence.get("present", False):
             # Presence kembali — reset timer unsettled
