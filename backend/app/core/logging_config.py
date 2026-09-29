@@ -8,17 +8,17 @@ from flask import Flask, g, request
 
 
 def configure_logging(app: Flask) -> None:
-    """Set up structured logging and per-request correlation IDs.
+    """Siapkan structured logging dan correlation ID per-request.
 
-    Behaviour is controlled by two env-driven flags in AppConfig:
+    Perilakunya dikontrol dua flag dari env di AppConfig:
 
     * ``access_logs_enabled`` (QC_SUITE_ACCESS_LOGS_ENABLED, default 1):
-        - ON  → every request logged at INFO (legacy behaviour).
-        - OFF → only requests with status >= 400 logged at WARNING; 2xx/3xx suppressed.
+        - ON  → tiap request dicatat di level INFO (perilaku lama).
+        - OFF → cuma request dengan status >= 400 dicatat di WARNING; 2xx/3xx tidak dicatat.
 
     * ``werkzeug_logs_enabled`` (QC_SUITE_WERKZEUG_REQUEST_LOGS_ENABLED, default 1):
-        - ON  → werkzeug keeps its default INFO logging.
-        - OFF → werkzeug logger raised to ERROR level (no per-request lines).
+        - ON  → werkzeug tetap pakai logging INFO default-nya.
+        - OFF → level logger werkzeug dinaikkan ke ERROR (tidak ada baris per-request).
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -26,7 +26,7 @@ def configure_logging(app: Flask) -> None:
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
 
-    # Read config early; AppConfig is set on app.config before this function is called.
+    # Baca config lebih awal; AppConfig sudah di-set di app.config sebelum fungsi ini dipanggil.
     qc_config = app.config.get("QC_SUITE")
     access_logs_enabled: bool = getattr(qc_config, "access_logs_enabled", True)
     werkzeug_logs_enabled: bool = getattr(qc_config, "werkzeug_logs_enabled", True)
@@ -64,6 +64,6 @@ def configure_logging(app: Flask) -> None:
                 "method=%s path=%s status=%d duration_ms=%.1f cid=%s",
                 request.method, request.path, status_code, duration_ms, cid,
             )
-        # else: 2xx/3xx suppressed in quiet mode
+        # else: 2xx/3xx tidak dicatat di quiet mode
         response.headers["X-Correlation-Id"] = cid
         return response

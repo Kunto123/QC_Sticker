@@ -1,2 +1,2 @@
-"""DTO-style contracts shared by backend and client."""
+"""Kontrak bergaya DTO yang dipakai bersama oleh backend dan client."""
 

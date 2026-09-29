@@ -1,8 +1,8 @@
-"""Gap detection service — part ready via template matching.
+"""Servis gap detection — part ready lewat template matching.
 
-Detects the blue clamp using HSV segmentation, extracts the gap area as a
-template patch from a reference image, and uses cv2.matchTemplate to confirm
-the part is at the correct position within the part_ready ROI.
+Mendeteksi clamp biru pakai segmentasi HSV, mengekstrak area gap sebagai
+patch template dari gambar referensi, lalu pakai cv2.matchTemplate untuk
+memastikan part ada di posisi yang benar di dalam ROI part_ready.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import numpy as np
 from backend.app.core.config import PROJECT_ROOT as project_root
 
 _logger = logging.getLogger(__name__)
-# Reference storage directory
+# Direktori penyimpanan referensi
 PART_READY_REF_DIR = "backend/app/assets/part_ready_refs"
 
 _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -28,8 +28,8 @@ def _auto_canny(
     low: int | None = None,
     high: int | None = None,
 ) -> np.ndarray:
-    """Canny edge map. Auto-tunes thresholds from the image median unless both
-    `low`/`high` are given explicitly (per-template manual override)."""
+    """Peta edge Canny. Auto-tune threshold dari median gambar kecuali kedua
+    `low`/`high` diberikan eksplisit (override manual per-template)."""
     gray = _clahe.apply(gray)   # normalkan brightness lokal sebelum hitung threshold
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     if low is not None and high is not None:
@@ -41,21 +41,21 @@ def _auto_canny(
 
 
 def get_ref_path(template_id: int) -> Path:
-    """Get the file path for a template's reference patch."""
+    """Ambil path file untuk patch referensi milik sebuah template."""
     ref_dir = Path(project_root) / PART_READY_REF_DIR
     ref_dir.mkdir(parents=True, exist_ok=True)
     return ref_dir / f"{template_id}.png"
 
 
 def load_ref_patch(ref_path: str | None, template_id: int | None = None) -> np.ndarray | None:
-    """Load reference patch PNG from disk. Returns None if file missing."""
+    """Muat PNG patch referensi dari disk. Return None kalau file tidak ada."""
     if ref_path:
         p = Path(ref_path)
         if p.is_file():
             img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
 
             return img if img is not None else None
-    # Fallback to standard path
+    # Fallback ke path standar
     if template_id is not None:
         p = get_ref_path(template_id)
         if p.is_file():
@@ -71,15 +71,15 @@ def save_ref_patch(
     canny_low: int | None = None,
     canny_high: int | None = None,
 ) -> tuple[bool, str]:
-    """Crop ROI, apply Canny edge detection, save as grayscale PNG.
+    """Crop ROI, terapkan deteksi tepi Canny, simpan sebagai PNG grayscale.
 
-    Returns (True, "") on success, (False, reason) on failure.
+    Return (True, "") kalau berhasil, (False, alasan) kalau gagal.
     """
     try:
         rx, ry = int(roi.get("x", 0)), int(roi.get("y", 0))
         rw, rh = int(roi.get("w", 0)), int(roi.get("h", 0))
         if rw <= 0 or rh <= 0:
-            return False, f"ROI dimensions invalid: w={rw} h={rh} (must be > 0)"
+            return False, f"Dimensi ROI tidak valid: w={rw} h={rh} (harus > 0)"
         fh, fw = frame_bgr.shape[:2]
         rx = max(0, min(rx, fw - 1))
         ry = max(0, min(ry, fh - 1))
@@ -87,7 +87,7 @@ def save_ref_patch(
         rh = min(rh, fh - ry)
         roi_frame = frame_bgr[ry:ry+rh, rx:rx+rw]
         if roi_frame.size == 0:
-            return False, f"ROI region empty after clipping (frame {fw}x{fh}, roi x={rx} y={ry} w={rw} h={rh})"
+            return False, f"Region ROI kosong setelah clipping (frame {fw}x{fh}, roi x={rx} y={ry} w={rw} h={rh})"
         gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
         edge_map = _auto_canny(gray, low=canny_low, high=canny_high)
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
@@ -102,10 +102,10 @@ def match_gap(frame_bgr: np.ndarray, roi: dict, ref_patch: np.ndarray,
               threshold: float = 0.85,
               canny_low: int | None = None,
               canny_high: int | None = None) -> dict[str, Any]:
-    """Run cv2.matchTemplate of ref_patch on the ROI region.
+    """Jalankan cv2.matchTemplate dari ref_patch pada region ROI.
 
     Returns:
-        {"match": bool, "score": float, "location": (x, y)} — all native Python types
+        {"match": bool, "score": float, "location": (x, y)} — semua tipe Python native
     """
     try:
         rx, ry = int(roi.get("x", 0)), int(roi.get("y", 0))
@@ -126,25 +126,26 @@ def match_gap(frame_bgr: np.ndarray, roi: dict, ref_patch: np.ndarray,
         gray = cv2.cvtColor(roi_frame, cv2.COLOR_BGR2GRAY)
         roi_frame = _auto_canny(gray, low=canny_low, high=canny_high)
 
-        # Ref patch must fit inside ROI
+        # Ref patch harus muat di dalam ROI
         ph, pw = ref_patch.shape[:2]
         if ph > rh or pw > rw:
-            # Resize ref patch to fit
+            # Resize ref patch supaya muat
             scale = min(rh / max(ph, 1), rw / max(pw, 1))
             new_w = max(1, int(pw * scale))
             new_h = max(1, int(ph * scale))
             ref_patch = cv2.resize(ref_patch, (new_w, new_h))
             ph, pw = ref_patch.shape[:2]
 
-        # Guard: TM_CCOEFF_NORMED divides by each patch's own variance. A
-        # constant (blank) reference or live edge map makes that variance
-        # exactly zero -> OpenCV's 0/0 resolves to a spurious 1.0 "perfect
-        # match" REGARDLESS of the other patch's content (verified: a blank
-        # reference scores 1.0 against any live image, blank or not). A
-        # reference with zero detected edges means Canny never fired during
-        # calibration and can never provide a meaningful comparison; a blank
-        # live capture (e.g. lens covered) can't confirm anything either —
-        # fail closed instead of trusting a degenerate correlation.
+        # Guard: TM_CCOEFF_NORMED membagi dengan variance milik masing-masing
+        # patch. Referensi (blank) atau edge map live yang konstan membuat
+        # variance itu persis nol -> 0/0 di OpenCV menghasilkan 1.0 palsu
+        # "perfect match" TERLEPAS dari isi patch lainnya (terverifikasi:
+        # referensi blank skor 1.0 melawan gambar live apa pun, blank atau
+        # tidak). Referensi dengan nol edge terdeteksi berarti Canny tidak
+        # pernah aktif saat kalibrasi dan tidak bisa memberi perbandingan yang
+        # bermakna; capture live yang blank (mis. lensa tertutup) juga tidak
+        # bisa mengonfirmasi apa pun — fail closed daripada percaya korelasi
+        # yang degenerate.
         if ref_patch.min() == ref_patch.max() or roi_frame.min() == roi_frame.max():
             return {"match": False, "score": 0.0, "location": (0, 0)}
 

@@ -23,8 +23,8 @@ def deploy_template():
     template = templates_repo.get_template(template_id)
     version = templates_repo.get_version(template_version_id)
     if template is None or version is None:
-        return jsonify({"error": "Template or version not found"}), 404
-    # Fail-fast: validate model has meta JSON with class_names
+        return jsonify({"error": "Template atau version tidak ditemukan"}), 404
+    # Fail-fast: validasi model punya meta JSON dengan class_names
     _model_path = (version.get("vision") or {}).get("model_path", "")
     if _model_path:
         _p = _Path(_model_path)
@@ -72,7 +72,7 @@ def get_active_deployment():
 def deactivate_deployment(deployment_id: int):
     ok = deployments_repo.deactivate(deployment_id)
     if not ok:
-        return jsonify({"error": "Deployment not found"}), 404
+        return jsonify({"error": "Deployment tidak ditemukan"}), 404
     return jsonify({"id": deployment_id, "is_active": False})
 
 
@@ -81,13 +81,13 @@ def deactivate_deployment(deployment_id: int):
 def update_deployment(deployment_id: int):
     payload = request.get_json(force=True) or {}
     if not isinstance(payload, dict):
-        return jsonify({"error": "Request body must be an object"}), 400
+        return jsonify({"error": "Request body harus berupa object"}), 400
 
     current = deployments_repo.get_deployment(deployment_id)
     if current is None:
-        return jsonify({"error": "Deployment not found"}), 404
+        return jsonify({"error": "Deployment tidak ditemukan"}), 404
     if not bool(current.get("is_active")):
-        return jsonify({"error": "Inactive deployment cannot be updated."}), 409
+        return jsonify({"error": "Deployment yang tidak aktif tidak bisa diupdate."}), 409
 
     updates: dict = {}
 
@@ -95,18 +95,18 @@ def update_deployment(deployment_id: int):
         try:
             template_version_id = int(payload.get("template_version_id") or 0)
         except (TypeError, ValueError):
-            return jsonify({"error": "template_version_id must be an integer"}), 400
+            return jsonify({"error": "template_version_id harus berupa angka"}), 400
         if template_version_id <= 0:
-            return jsonify({"error": "template_version_id must be a positive integer"}), 400
+            return jsonify({"error": "template_version_id harus angka positif"}), 400
 
         version = templates_repo.get_version(template_version_id)
         if version is None:
-            return jsonify({"error": "Template version not found"}), 404
+            return jsonify({"error": "Template version tidak ditemukan"}), 404
 
         version_template_id = int((version.get("template") or {}).get("id") or 0)
         current_template_id = int(current.get("template_id") or 0)
         if version_template_id != current_template_id:
-            return jsonify({"error": "Template version does not belong to deployment template"}), 400
+            return jsonify({"error": "Template version ini bukan milik template deployment"}), 400
 
         updates["template_version_id"] = template_version_id
         updates["template_name"] = str((version.get("template") or {}).get("name") or current.get("template_name") or "")
@@ -120,7 +120,7 @@ def update_deployment(deployment_id: int):
         updates["deployed_by"] = actor.id
 
     if not updates:
-        return jsonify({"error": "At least one mutable field must be provided"}), 400
+        return jsonify({"error": "Minimal satu field yang bisa diubah harus diisi"}), 400
 
     try:
         record = deployments_repo.update_deployment(deployment_id, **updates)

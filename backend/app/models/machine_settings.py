@@ -1,15 +1,15 @@
-"""Machine Settings model — per-machine PLC, timing and inference config.
+"""Model Machine Settings — config PLC, timing, dan inference per mesin.
 
-Stored as `data/json_store/machine_settings.json` and edited from the Admin →
-Machine Settings tab. This file is the ONLY source of truth for these values:
-nothing here is read from `.env` any more. A missing file / missing key means
-"use the dataclass default" (fresh PC).
+Disimpan di `data/json_store/machine_settings.json` dan diedit dari tab Admin →
+Machine Settings. File ini SATU-SATUNYA sumber kebenaran untuk nilai-nilai
+ini: tidak ada lagi yang dibaca dari `.env`. File/key yang tidak ada artinya
+"pakai default dataclass" (PC baru).
 
-Sections
-  connection  PLC transport (needs a backend restart to take effect)
-  io          relay / input addresses + PLC pulse & guard timing (live-applied)
-  timing      inspection timers / commit policy (live-applied)
-  inference   sticker model + device / thread settings (needs a restart)
+Bagian
+  connection  transport PLC (butuh restart backend supaya berlaku)
+  io          alamat relay / input + timing pulse & guard PLC (diterapkan langsung)
+  timing      timer inspeksi / commit policy (diterapkan langsung)
+  inference   model sticker + setting device / thread (butuh restart)
 """
 from __future__ import annotations
 
@@ -37,17 +37,17 @@ class PlcConnectionConfig:
 
 @dataclass(slots=True)
 class PlcIoConfig:
-    """Relay / input map + PLC-side timing for the sticker flow."""
-    # Relay coil addresses (CH1=Enji Buzzer, CH2=OK Light+Buzzer, CH3=Clamp)
+    """Peta relay / input + timing sisi-PLC untuk alur sticker."""
+    # Alamat coil relay (CH1=Enji Buzzer, CH2=OK Light+Buzzer, CH3=Clamp)
     relay_clamp_address: int = 3
     relay_ok_light_buzzer_address: int = 2
     relay_enji_buzzer_address: int = 1
-    # Input addresses
+    # Alamat input
     input_release_address: int = 0
     input_template_address: int = 1
     input_clamp_engaged_address: int = 2
     clamp_feedback_enabled: bool = False
-    # Timing / guards
+    # Timing / guard
     accept_pulse_ms: int = 1000
     min_reclamp_interval_ms: int = 3000
     release_input_debounce_ms: int = 200
@@ -55,14 +55,14 @@ class PlcIoConfig:
 
 @dataclass(slots=True)
 class TimingConfig:
-    """Inspection timer / operator-phase / commit-policy settings."""
-    # Operator phase pacing (non-blocking gates)
+    """Timer inspeksi / phase operator / setting commit-policy."""
+    # Pacing phase operator (gate non-blocking)
     phase_next_part_delay_ms: int = 2000
     phase_sticker_install_delay_ms: int = 0
-    # Stability thresholds before an ACCEPT commit
+    # Threshold stabilitas sebelum commit ACCEPT
     accept_stable_frames: int = 1
     accept_stable_ms: int = 200
-    # Commit guard
+    # Guard commit
     commit_grace_ms: int = 1500
     reject_timeout_ms: int = 15000
     # Part ready
@@ -72,39 +72,39 @@ class TimingConfig:
     inference_cache_grace_ms: int = 300
     accept_holdover_ms: int = 2000
     inference_cache_ttl_ms: int = 10000
-    # Safety / session
+    # Keamanan / sesi
     session_idle_timeout_s: int = 300
     max_consecutive_rejects: int = 0
 
 
 @dataclass(slots=True)
 class IdentitySettings:
-    line: str = ""  # reserved — will back a separate table later
+    line: str = ""  # reserved — nanti jadi basis tabel terpisah
 
 
 @dataclass(slots=True)
 class InferenceConfig:
-    """Sticker model runtime — per-PC hardware settings."""
+    """Runtime model sticker — setting hardware per-PC."""
     mode: str = "auto"      # auto | ultralytics | onnx | openvino | tflite | classic
     device: str = "auto"    # auto | cpu | cuda
     cuda_device_id: int = 0
     num_threads: int = 4
-    interval_ms: int = 0    # min ms between inference runs; 0 = every frame
+    interval_ms: int = 0    # ms minimum antar-run inference; 0 = tiap frame
     timeout_s: float = 5.0
-    # Fallback model when the active template has no vision.model_path
+    # Model fallback kalau template aktif tidak punya vision.model_path
     default_model_path: str = ""
     default_model_meta_path: str = ""
 
 
 def _section(cls, data: dict[str, Any] | None):
-    """Build a section dataclass from a dict, dropping unknown keys."""
+    """Bangun dataclass bagian dari dict, buang key yang tidak dikenal."""
     raw = data or {}
     return cls(**{k: v for k, v in raw.items() if k in cls.__slots__})
 
 
 @dataclass(slots=True)
 class MachineSettings:
-    """Top-level machine settings — one record per machine."""
+    """Machine settings tingkat atas — satu record per mesin."""
     version: int = SETTINGS_VERSION
     connection: PlcConnectionConfig = field(default_factory=PlcConnectionConfig)
     io: PlcIoConfig = field(default_factory=PlcIoConfig)
@@ -124,7 +124,7 @@ class MachineSettings:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> MachineSettings:
-        # v1 files stored the I/O map under "sticker" (and a never-used "counter").
+        # File v1 menyimpan peta I/O di bawah "sticker" (dan "counter" yang tidak pernah dipakai).
         io_raw = data.get("io")
         if io_raw is None:
             io_raw = data.get("sticker")

@@ -34,20 +34,22 @@ class VisionConfig:
 @dataclass(slots=True)
 class PartReadyConfig:
     enabled: bool = True
-    # "gap_template_match" (edge-map template match against a captured reference)
-    # or "mean_std_threshold" (grayscale mean/std gate). Anything else fails closed.
+    # "gap_template_match" (pencocokan template edge-map terhadap referensi
+    # yang sudah diambil) atau "mean_std_threshold" (gate mean/std grayscale).
+    # Selain itu dianggap gagal (fail closed).
     method: str = "gap_template_match"
     gap_match_threshold: float = 0.85
     gap_ref_path: str | None = None
-    # Canny edge thresholds for gap_template_match. None (either) = auto-tuned
-    # from the ROI's own brightness median (legacy behaviour, unchanged default).
+    # Threshold edge Canny untuk gap_template_match. None (salah satu) = auto-tuned
+    # dari median brightness ROI itu sendiri (perilaku lama, default tidak berubah).
     canny_low: int | None = None
     canny_high: int | None = None
-    # gap_template_match only: how far (fraction of the ROI's own w/h, each
-    # side) the runtime search area is grown beyond part_ready_roi so
-    # cv2.matchTemplate has room to find a shifted part instead of comparing
-    # at a single fixed offset. 0.0 = legacy behaviour (search area == ROI ==
-    # reference patch size, zero translation tolerance).
+    # Khusus gap_template_match: seberapa jauh (fraksi dari w/h ROI itu
+    # sendiri, tiap sisi) area pencarian saat runtime diperbesar melebihi
+    # part_ready_roi, supaya cv2.matchTemplate punya ruang untuk menemukan
+    # part yang bergeser, bukan cuma dibandingkan pada satu offset tetap.
+    # 0.0 = perilaku lama (area pencarian == ROI == ukuran patch referensi,
+    # tanpa toleransi pergeseran).
     gap_search_margin: float = 0.0
     min_match_ratio: float = 0.5
     stable_ms: int = 500
@@ -127,8 +129,8 @@ def _pick_roi_payload(payload: dict[str, Any], *keys: str) -> dict[str, Any]:
     return {}
 
 
-# Unknown keys (old DB data: OCR/tilt/colour-profile/counter fields, `mode`,
-# `criteria`, `component_rois`, ...) are silently dropped on parse.
+# Key yang tidak dikenal (data DB lama: field OCR/tilt/colour-profile/counter,
+# `mode`, `criteria`, `component_rois`, ...) langsung dibuang diam-diam saat parsing.
 _VALID_PART_READY_FIELDS = set(PartReadyConfig.__slots__)
 _VALID_STICKER_FIELDS = set(StickerRule.__slots__)
 _VALID_VISION_FIELDS = set(VisionConfig.__slots__)
@@ -136,7 +138,7 @@ _VALID_CAMERA_FIELDS = set(CameraDefaults.__slots__)
 
 
 def template_from_dict(payload: dict[str, Any]) -> InspectionTemplate:
-    """Parse a template dict, tolerating keys from older template layouts."""
+    """Parse dict template, mentolerir key dari layout template versi lama."""
     part_ready_roi_payload = _pick_roi_payload(payload, "part_ready_roi", "roi", "sticker_roi")
     sticker_roi_payload = _pick_roi_payload(payload, "sticker_roi", "roi", "part_ready_roi")
     part_ready_roi_payload = {k: v for k, v in part_ready_roi_payload.items() if k in _ROI_ALLOWED}
@@ -168,15 +170,15 @@ def template_from_dict(payload: dict[str, Any]) -> InspectionTemplate:
 
 
 def validate_sticker_rule(sticker: dict[str, Any]) -> list[str]:
-    """Validate the `sticker` section of a template payload. Empty list means valid."""
+    """Validasi bagian `sticker` dari payload template. List kosong berarti valid."""
     errors: list[str] = []
     if not str(sticker.get("expected_class") or "").strip():
-        errors.append("sticker: expected_class is required")
+        errors.append("sticker: expected_class wajib diisi")
     if sticker.get("min_roi_confidence") is not None:
         try:
             v = float(sticker["min_roi_confidence"])
             if v < 0 or v > 1:
-                errors.append(f"sticker: min_roi_confidence {v} out of range [0,1]")
+                errors.append(f"sticker: min_roi_confidence {v} di luar rentang [0,1]")
         except (TypeError, ValueError):
-            errors.append("sticker: min_roi_confidence must be a float")
+            errors.append("sticker: min_roi_confidence harus berupa angka desimal")
     return errors

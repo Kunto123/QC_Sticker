@@ -180,7 +180,7 @@ class OpenVinoZipImportTest(ImportTestBase):
             "m/best.xml": b"<net/>",
             "m/metadata.yaml": OPENVINO_YAML,
         })
-        with self.assertRaisesRegex(ValueError, "no matching 'best.bin'"):
+        with self.assertRaisesRegex(ValueError, "tidak punya pasangan 'best.bin'"):
             self.service.import_model_archive(archive)
         self.assertEqual(list(self.models_dir.iterdir()), [])
         self.assertEqual(self.models_repo.list_models(), [])
@@ -190,7 +190,7 @@ class OpenVinoZipImportTest(ImportTestBase):
         result = self.service.import_model_archive(archive)
         self.assertEqual(result["class_names"], [])
         self.assertEqual(len(result["warnings"]), 1)
-        self.assertIn("No class names", result["warnings"][0])
+        self.assertIn("Tidak ketemu class names", result["warnings"][0])
         meta = json.loads((Path(result["model_dir"]) / "best.meta.json").read_text(encoding="utf-8"))
         self.assertEqual(meta["class_names"], [])
 
@@ -199,18 +199,18 @@ class OpenVinoZipImportTest(ImportTestBase):
             "a/best.xml": b"<net/>", "a/best.bin": b"\x00",
             "b/best.pt": b"pt",
         })
-        with self.assertRaisesRegex(ValueError, "more than one model file"):
+        with self.assertRaisesRegex(ValueError, "lebih dari satu file model"):
             self.service.import_model_archive(archive)
 
     def test_zip_without_model_is_rejected(self) -> None:
         archive = _write_zip(self.root / "empty.zip", {"readme.txt": b"hi"})
-        with self.assertRaisesRegex(ValueError, "no model file"):
+        with self.assertRaisesRegex(ValueError, "tidak berisi file model"):
             self.service.import_model_archive(archive)
 
     def test_not_a_zip_is_rejected(self) -> None:
         bogus = self.root / "bogus.zip"
         bogus.write_bytes(b"not a zip")
-        with self.assertRaisesRegex(ValueError, "not a valid zip"):
+        with self.assertRaisesRegex(ValueError, "bukan zip archive yang valid"):
             self.service.import_model_archive(bogus)
 
     def test_duplicate_name_gets_imported_suffix_and_separate_folder(self) -> None:
@@ -292,7 +292,7 @@ class OtherFormatsImportTest(ImportTestBase):
             "weights.pt": b"changed",
             "EXPORT_MANIFEST.json": json.dumps(manifest).encode(),
         })
-        with self.assertRaisesRegex(ValueError, "checksum mismatch"):
+        with self.assertRaisesRegex(ValueError, "Checksum archive tidak cocok"):
             self.service.import_model_archive(archive)
         self.assertEqual(list(self.models_dir.iterdir()), [])
         result = self.service.import_model_archive(archive, skip_validation=True)

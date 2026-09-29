@@ -35,7 +35,7 @@ class PostgresRepositoryBase:
         if not self._config.postgresql_password:
             missing.append("POSTGRESQL_PASSWORD")
         if missing:
-            raise ValueError("PostgreSQL configuration is incomplete: " + ", ".join(missing))
+            raise ValueError("Konfigurasi PostgreSQL belum lengkap: " + ", ".join(missing))
 
     def _connect(self):
         from psycopg import connect

@@ -1,2 +1,2 @@
-"""Shared contracts for qc-suite-python."""
+"""Kontrak bersama untuk qc-suite-python."""
 

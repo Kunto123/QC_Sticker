@@ -1,17 +1,17 @@
-"""Relaunch the desktop app after this process exits.
+"""Jalankan ulang app desktop setelah proses ini exit.
 
-Used by the Machine Settings tab's "Restart Backend" button. In local-only mode
-the backend is embedded in the client process, so "restart backend" means
-"restart this process". In split mode started by scripts/run_desktop.py the
-backend subprocess is terminated only when the launcher exits, so the new
-instance must not start before the old one is fully gone (port / COM / camera
-would collide). Hence the two-step dance:
+Dipakai tombol "Restart Backend" di tab Machine Settings. Di mode local-only
+backend ter-embed di proses client, jadi "restart backend" berarti "restart
+proses ini". Di mode split yang dimulai scripts/run_desktop.py, subprocess
+backend cuma dihentikan saat launcher exit, jadi instance baru tidak boleh
+mulai sebelum yang lama benar-benar hilang (port / COM / kamera bisa
+bentrok). Makanya perlu tarian dua langkah:
 
-  1. `schedule_relaunch()` spawns a detached helper
+  1. `schedule_relaunch()` spawn helper terpisah
      (`python -m client_tk.app.services.app_restart --wait-pid <pid> ...`).
-  2. The caller shuts the app down normally.
-  3. The helper waits for that pid to disappear, then starts the same command
-     line again with stdout/stderr appended to `<data_root>/restart.log`.
+  2. Pemanggil mematikan app secara normal.
+  3. Helper menunggu pid itu hilang, lalu menjalankan command line yang sama
+     lagi dengan stdout/stderr ditambahkan ke `<data_root>/restart.log`.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def _detached_flags() -> dict:
 
 
 def schedule_relaunch(argv: list[str], *, cwd: str | os.PathLike, log_path: str | os.PathLike) -> subprocess.Popen:
-    """Spawn the detached waiter that relaunches `argv` once this process has exited."""
+    """Spawn waiter terpisah yang menjalankan ulang `argv` setelah proses ini exit."""
     cmd = [
         sys.executable, "-m", "client_tk.app.services.app_restart",
         "--wait-pid", str(os.getpid()),
@@ -62,7 +62,7 @@ def _pid_alive(pid: int) -> bool:
         if not handle:
             return False
         try:
-            # WAIT_TIMEOUT (0x102) means still running; WAIT_OBJECT_0 means exited.
+            # WAIT_TIMEOUT (0x102) berarti masih jalan; WAIT_OBJECT_0 berarti sudah exit.
             return ctypes.windll.kernel32.WaitForSingleObject(handle, 0) == 0x102
         finally:
             ctypes.windll.kernel32.CloseHandle(handle)
@@ -74,7 +74,7 @@ def _pid_alive(pid: int) -> bool:
 
 
 def wait_for_exit(pid: int, *, timeout_s: float = 60.0, poll_s: float = 0.25) -> bool:
-    """Block until `pid` is gone. Returns False if it is still alive after `timeout_s`."""
+    """Blok sampai `pid` hilang. Return False kalau masih hidup setelah `timeout_s`."""
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if not _pid_alive(pid):
@@ -84,7 +84,7 @@ def wait_for_exit(pid: int, *, timeout_s: float = 60.0, poll_s: float = 0.25) ->
 
 
 def relaunch(argv: list[str], *, cwd: str | os.PathLike, log_path: str | os.PathLike) -> subprocess.Popen:
-    """Start `argv` detached, appending its output to `log_path`."""
+    """Jalankan `argv` secara terpisah, tambahkan outputnya ke `log_path`."""
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
     log = open(log_path, "ab")
     log.write(f"\n=== relaunch {time.strftime('%Y-%m-%d %H:%M:%S')}: {' '.join(argv)}\n".encode("utf-8"))
@@ -100,7 +100,7 @@ def relaunch(argv: list[str], *, cwd: str | os.PathLike, log_path: str | os.Path
 
 
 def main(args: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Wait for a process to exit, then relaunch a command.")
+    parser = argparse.ArgumentParser(description="Tunggu proses exit, lalu jalankan ulang command.")
     parser.add_argument("--wait-pid", type=int, required=True)
     parser.add_argument("--cwd", required=True)
     parser.add_argument("--log", required=True)
@@ -110,8 +110,8 @@ def main(args: list[str] | None = None) -> int:
     argv = [a for a in ns.argv if a != "--"] if ns.argv and ns.argv[0] == "--" else ns.argv
     if not argv:
         return 2
-    # Give the old process a head start on releasing the camera / COM port even after
-    # its pid is gone (driver handles can lag a little behind process exit).
+    # Beri proses lama waktu ekstra untuk melepas kamera / COM port meskipun
+    # pid-nya sudah hilang (handle driver bisa sedikit lag dari exit proses).
     if not wait_for_exit(ns.wait_pid, timeout_s=ns.timeout):
         return 3
     time.sleep(1.0)

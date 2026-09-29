@@ -21,14 +21,14 @@ class CameraCaptureService:
         self._last_frame_before_disconnect = None
         self._disconnect_notified = False
         self._status_callback = None
-        self._epoch = 0  # generation token — incremented on each start()
-        # Transient-drop tolerance: allow N brief retries before declaring disconnect
+        self._epoch = 0  # token generasi — bertambah tiap kali start()
+        # Toleransi drop transient: izinkan N retry singkat sebelum menyatakan disconnect
         self._max_consecutive_failures = int(os.getenv("QC_SUITE_CAMERA_MAX_CONSECUTIVE_FAILURES", "5"))
         self._transient_retry_delay_s = float(os.getenv("QC_SUITE_CAMERA_TRANSIENT_RETRY_S", "0.1"))
         self._consecutive_fail = 0
 
     def set_status_callback(self, callback) -> None:
-        """Set callback for status updates: 'connected', 'reconnecting', 'error'."""
+        """Set callback untuk update status: 'connected', 'reconnecting', 'error'."""
         self._status_callback = callback
 
     def _notify_status(self, status: str) -> None:
@@ -48,7 +48,7 @@ class CameraCaptureService:
     ) -> None:
         self.stop()
         with self._lock:
-            self._epoch += 1  # new generation
+            self._epoch += 1  # generasi baru
         self._camera_index = int(camera_index)
         self._reconnecting = False
         self._disconnect_notified = False
@@ -63,7 +63,7 @@ class CameraCaptureService:
         self._notify_status("connected")
 
     def _open_camera(self, width=None, height=None, fps=None) -> None:
-        """Open camera with backend fallback."""
+        """Buka kamera dengan fallback backend."""
         self._capture = None
         backend_candidates = []
         if hasattr(cv2, "CAP_DSHOW"):
@@ -84,10 +84,10 @@ class CameraCaptureService:
             capture.release()
 
         if self._capture is None or not self._capture.isOpened():
-            raise RuntimeError(f"Cannot open camera index {self._camera_index}")
+            raise RuntimeError(f"Tidak bisa membuka kamera index {self._camera_index}")
         if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
             self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        # Configurable exposure
+        # Exposure yang bisa dikonfigurasi
         _auto_exp = int(os.getenv("QC_SUITE_CAMERA_AUTO_EXPOSURE", "1"))
         if _auto_exp == 0:
             _exp_val = int(os.getenv("QC_SUITE_CAMERA_EXPOSURE_VALUE", "-6"))
@@ -111,17 +111,17 @@ class CameraCaptureService:
         }
 
     def _loop(self) -> None:
-        """Main capture loop with auto-reconnect and epoch guard."""
-        my_epoch = self._epoch  # capture epoch at thread start
+        """Loop capture utama dengan auto-reconnect dan epoch guard."""
+        my_epoch = self._epoch  # catat epoch saat thread mulai
         while True:
-            # Epoch guard: bail if start() was called again (new generation)
+            # Epoch guard: keluar kalau start() dipanggil lagi (generasi baru)
             with self._lock:
                 if self._epoch != my_epoch or not self._running:
                     return
 
             capture = self._capture
             if capture is None or not capture.isOpened():
-                # Camera disconnected — try to reconnect
+                # Kamera terputus — coba reconnect
                 with self._lock:
                     if self._epoch != my_epoch or not self._running:
                         return
@@ -161,15 +161,15 @@ class CameraCaptureService:
             if ok and frame is not None:
                 with self._lock:
                     self._frame = frame
-                    self._consecutive_fail = 0  # reset on good frame
+                    self._consecutive_fail = 0  # reset kalau frame bagus
             else:
-                # Frame read failed — could be transient (MSMF bandwidth) or real disconnect
+                # Read frame gagal — bisa transient (bandwidth MSMF) atau disconnect beneran
                 self._consecutive_fail += 1
                 if self._consecutive_fail < self._max_consecutive_failures:
-                    # Transient drop: brief retry without releasing camera
+                    # Drop transient: retry singkat tanpa melepas kamera
                     time.sleep(self._transient_retry_delay_s)
                     continue
-                # Exceeded tolerance — treat as real disconnect
+                # Melebihi toleransi — anggap disconnect beneran
                 with self._lock:
                     if self._epoch != my_epoch or not self._running:
                         return
@@ -204,7 +204,7 @@ class CameraCaptureService:
 
     @property
     def is_active(self) -> bool:
-        """Return True while capture service is running (even during reconnect)."""
+        """Return True selama service capture berjalan (bahkan saat reconnect)."""
         return self._running
 
     @property
@@ -217,7 +217,7 @@ class CameraCaptureService:
             self._epoch += 1  # invalidate current generation
             capture = self._capture
             self._capture = None
-        # Release capture outside lock to avoid blocking
+        # Release capture di luar lock supaya tidak blocking
         if capture is not None:
             try:
                 capture.release()
@@ -225,7 +225,7 @@ class CameraCaptureService:
                 pass
         thread = self._thread
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
-            thread.join(timeout=5.0)  # longer timeout; epoch guard ensures thread exits
+            thread.join(timeout=5.0)  # timeout lebih lama; epoch guard memastikan thread keluar
         self._thread = None
         self._actual_settings = {}
         self._reconnecting = False

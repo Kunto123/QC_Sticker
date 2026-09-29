@@ -1,11 +1,11 @@
 # FASE 0 — Regression Safety Net: Handoff
 
-Author: SUBAGENT NET. Branch: `rev1`.
-Scope of my edits: `backend/tests/`, `scripts/`, `conftest.py`, `pyproject.toml`
-`[tool.pytest]`, `backend/tests/fixtures/`, this file, `TESTING.md`. **No production
-code was modified** (nothing under `backend/app/`, `shared/`, `client_tk/app/`).
+Penulis: SUBAGENT NET. Branch: `rev1`.
+Cakupan editan saya: `backend/tests/`, `scripts/`, `conftest.py`, `pyproject.toml`
+`[tool.pytest]`, `backend/tests/fixtures/`, file ini, `TESTING.md`. **Tidak ada kode
+produksi yang diubah** (tidak ada yang di bawah `backend/app/`, `shared/`, `client_tk/app/`).
 
-Reproduce the suite:
+Reproduksi suite-nya:
 
 ```sh
 scripts/run_tests.sh
@@ -15,48 +15,50 @@ python -m pytest backend/tests -q
 
 ---
 
-## 1. Final suite state
+## 1. State akhir suite
 
-| Metric | Baseline | After triage | After adjudication (final) |
+| Metrik | Baseline | Setelah triage | Setelah adjudikasi (final) |
 | --- | --- | --- | --- |
 | passed | 229 | 292 | **315** |
 | failed | 49 | 37 | **0** |
-| skipped | 1 | 10 | **10** (real-model integration tests, see 2b) |
+| skipped | 1 | 10 | **10** (test integrasi model asli, lihat 2b) |
 
-The suite is now **FULLY GREEN** (0 failed). The 10 skips are the api_smoke
-integration tests that require the production sticker model (outside the repo) —
-that's acceptable and expected; see 2b.
+Suite sekarang **FULLY GREEN** (0 failed). 10 skip itu adalah test integrasi
+api_smoke yang butuh model sticker produksi (di luar repo) — itu wajar dan
+diperkirakan; lihat 2b.
 
-**History:** After my initial triage the 5 regression clusters R1–R5 were kept RED
-pending a human decision. The human orchestrator then ADJUDICATED all five as
-INTENTIONAL redesigns (not accidental regressions), so those tests were obsolete
-tests for deliberately-removed/changed features. I resolved them per the decisions
-in section 3 (RESOLVED) — rewriting to cover the NEW behavior where coverage
-mattered (PLC adapter/worker, deployment, plc/status auth) and deleting only the
-truly-dead OCR tests. Production dead-code cleanup that these decisions imply is
-out of my region and is captured in section 6 (FASE 1 handoff).
+**Riwayat:** Setelah triage awal saya, 5 klaster regresi R1–R5 dibiarkan RED
+menunggu keputusan manusia. Orkestrator manusia lalu MENGADJUDIKASI kelimanya
+sebagai redesign INTENSIONAL (bukan regresi tak sengaja), jadi test-test itu
+adalah test usang untuk fitur yang sengaja dihapus/diubah. Saya selesaikan
+sesuai keputusan di section 3 (RESOLVED) — menulis ulang untuk mencakup
+behavior BARU di mana coverage-nya penting (PLC adapter/worker, deployment,
+auth plc/status) dan menghapus hanya test OCR yang benar-benar mati. Pembersihan
+dead-code produksi yang diimplikasikan keputusan ini di luar wilayah saya dan
+dicatat di section 6 (handoff FASE 1).
 
 ---
 
-## 2. Triage buckets
+## 2. Bucket triage
 
-### 2a. Fixed as ENV/INFRA (test harness / seeding)
+### 2a. Diperbaiki sebagai ENV/INFRA (test harness / seeding)
 
-| Test | Root cause | Fix |
+| Test | Akar masalah | Fix |
 | --- | --- | --- |
-| `test_api_smoke::test_00b_seeded_model_registry_contains_default_model` | `models_repository._default_models_payload()` seeds an EMPTY registry when `QC_SUITE_DEFAULT_STICKER_MODEL_PATH` is blank (unset in a bare checkout). | `conftest.py` now sets that env var to an in-repo `.pt` (`yolov5su.pt`) if unset. Registry becomes non-empty; test passes. |
+| `test_api_smoke::test_00b_seeded_model_registry_contains_default_model` | `models_repository._default_models_payload()` men-seed registry KOSONG kalau `QC_SUITE_DEFAULT_STICKER_MODEL_PATH` kosong (belum di-set di checkout bersih). | `conftest.py` sekarang set env var itu ke `.pt` di dalam repo (`yolov5su.pt`) kalau belum di-set. Registry jadi tidak kosong; test lolos. |
 
-### 2b. Skipped as ENV/INFRA — need the production sticker model (outside repo)
+### 2b. Di-skip sebagai ENV/INFRA — butuh model sticker produksi (di luar repo)
 
-These 10 integration tests drive the full inspection pipeline and expect an
-`ACCEPT` + DB commit on a synthetic white-rectangle image. That only happens with
-the real trained **"AKH Sticker Detector"** model, which lives OUTSIDE the repo
-(`QC_SUITE_DEFAULT_STICKER_MODEL_PATH=D:\qc-suite-data\models\sticker.pt`, per
-README). A generic `yolov5su.pt` cannot detect the synthetic sticker → decision
-stays `REJECT`, nothing commits, and every downstream assertion (`count_committed`,
-`result_id`, `total_inspections`, settle-timing) fails. NOT a code regression.
+10 test integrasi ini menjalankan seluruh pipeline inspeksi dan mengharapkan
+`ACCEPT` + commit DB pada gambar sintetis kotak putih. Itu cuma terjadi dengan
+model asli terlatih **"AKH Sticker Detector"**, yang hidup DI LUAR repo
+(`QC_SUITE_DEFAULT_STICKER_MODEL_PATH=D:\qc-suite-data\models\sticker.pt`, sesuai
+README). `yolov5su.pt` generik tidak bisa mendeteksi sticker sintetis → keputusan
+tetap `REJECT`, tidak ada yang commit, dan tiap assertion downstream
+(`count_committed`, `result_id`, `total_inspections`, timing settle) gagal.
+BUKAN regresi kode.
 
-Marked with `@unittest.skip(_REQUIRES_REAL_STICKER_MODEL)` in `test_api_smoke.py`:
+Ditandai `@unittest.skip(_REQUIRES_REAL_STICKER_MODEL)` di `test_api_smoke.py`:
 
 - `test_01_operator_flow_accepts_centered_detection`
 - `test_02_part_ready_color_gate_blocks_commit_until_match`
@@ -69,475 +71,513 @@ Marked with `@unittest.skip(_REQUIRES_REAL_STICKER_MODEL)` in `test_api_smoke.py
 - `test_13h_settle_ms_controls_commit_after_settle_window`
 - `test_15g_rejects_are_logged_locally_and_not_persisted_to_results_db`
 
-**To un-skip:** point `QC_SUITE_DEFAULT_STICKER_MODEL_PATH` /
-`QC_SUITE_DEFAULT_STICKER_MODEL_META_PATH` at the real sticker model + meta and
-remove the decorators. A later phase should provide a small checked-in test model
-(or a deterministic fake detection backend) so these run in CI.
+**Untuk un-skip:** arahkan `QC_SUITE_DEFAULT_STICKER_MODEL_PATH` /
+`QC_SUITE_DEFAULT_STICKER_MODEL_META_PATH` ke model sticker asli + meta-nya dan
+hapus dekoratornya. Fase berikutnya sebaiknya menyediakan model test kecil yang
+di-checked-in (atau backend deteksi palsu yang deterministik) supaya ini jalan di CI.
 
-### 2c. No genuinely-stale tests were silently rewritten-to-pass during triage
+### 2c. Tidak ada test usang asli yang diam-diam ditulis ulang supaya lolos saat triage
 
-During triage I did not paper over any failure. Every RED test was either an
-env/infra skip or was escalated to the orchestrator as a suspected regression
-(section 3). The classic "stale drift" symptom (`ModbusTcpClient('10.0.0.5', ...)`
-positional vs `host=` keyword) was part of the PLC-adapter rewrite cluster (R1) and
-was resolved only after the orchestrator confirmed the rewrite was intentional.
+Selama triage saya tidak menutupi kegagalan apa pun. Tiap test RED itu skip
+env/infra atau dieskalasi ke orkestrator sebagai dugaan regresi (section 3).
+Gejala klasik "stale drift" (`ModbusTcpClient('10.0.0.5', ...)` positional vs
+keyword `host=`) adalah bagian dari klaster penulisan-ulang PLC-adapter (R1) dan
+baru diselesaikan setelah orkestrator mengonfirmasi penulisan ulang itu memang disengaja.
 
 ---
 
-## 3. RESOLVED — orchestrator decided (intentional redesign)
+## 3. RESOLVED — diputuskan orkestrator (redesign disengaja)
 
-The human orchestrator adjudicated all five clusters as INTENTIONAL redesigns. The
-RED tests were therefore obsolete tests for deliberately-removed/changed features. I
-resolved each below — keeping coverage of the NEW behavior wherever it mattered, and
-deleting only genuinely-dead tests. All are now GREEN.
+Orkestrator manusia mengadjudikasi kelima klaster sebagai redesign DISENGAJA.
+Test RED karena itu adalah test usang untuk fitur yang sengaja dihapus/diubah.
+Saya selesaikan masing-masing di bawah — menjaga coverage behavior BARU di mana
+itu penting, dan menghapus hanya test yang benar-benar mati. Semuanya sekarang GREEN.
 
-### R1 — PLC adapter: minimal `write_coil`/`read_inputs`/`slave_id` design is intended
-**Decision:** the minimal adapter is the new design (clamp/readback/command-mode API
-intentionally removed).
-**Action taken:** REPLACED `backend/tests/test_plc_modbus_adapter.py` — retired the 23
-obsolete old-API tests and wrote a lean suite (19 tests) for the API that exists now:
-`DryRunPlcAdapter` lifecycle/status/read_inputs; `ModbusTcpPlcAdapter` host/port/timeout
-wiring + lazy-connect + `write_coil(addr,val,device_id=slave_id)` + FC02 read + error
-raise; `ModbusRtuPlcAdapter` constructor + write; `build_plc_adapter` selection
-(dry-run/tcp/rtu/unknown→dry-run). PLC adapter coverage did not drop to zero.
-**Dead production code this leaves → FASE 1:** see section 6.
+### R1 — PLC adapter: desain minimal `write_coil`/`read_inputs`/`slave_id` memang disengaja
+**Keputusan:** adapter minimal adalah desain baru (API clamp/readback/command-mode
+sengaja dihapus).
+**Aksi yang diambil:** MENGGANTI `backend/tests/test_plc_modbus_adapter.py` — memensiunkan
+23 test API-lama yang usang dan menulis suite ramping (19 test) untuk API yang ada
+sekarang: lifecycle/status/read_inputs `DryRunPlcAdapter`; wiring host/port/timeout
+`ModbusTcpPlcAdapter` + lazy-connect + `write_coil(addr,val,device_id=slave_id)` + read
+FC02 + raise error; constructor + write `ModbusRtuPlcAdapter`; seleksi
+`build_plc_adapter` (dry-run/tcp/rtu/unknown→dry-run). Coverage PLC adapter tidak jatuh
+ke nol.
+**Dead code produksi yang ditinggalkan → FASE 1:** lihat section 6.
 
-### R2 — PLC worker: accept-pulse + input-polling model is intended (no `hold_ms`)
-**Decision:** clamp hold/release + `hold_ms` intentionally replaced.
-**Action taken:** REWROTE the three worker tests for the new behavior:
-- `test_15e` → `test_15e_plc_worker_notify_decision_enqueues_once`: asserts
-  `worker.notify_decision(...)` enqueues one command per decision (dry-run).
-- `test_15f`: asserts `DryRunPlcAdapter` write/read/all_off + status (was send_clamp_*).
-- The `test_plc_modbus_adapter` worker test → `PlcWorkerInputPollingTest`: IN1
-  manual-release needs stable debounce before all-off; IN2 template-cycle once per
-  debounce; `notify_decision` enqueues. Worker coverage preserved.
+### R2 — PLC worker: model accept-pulse + input-polling memang disengaja (tanpa `hold_ms`)
+**Keputusan:** clamp hold/release + `hold_ms` sengaja diganti.
+**Aksi yang diambil:** MENULIS ULANG tiga test worker untuk behavior baru:
+- `test_15e` → `test_15e_plc_worker_notify_decision_enqueues_once`: assert
+  `worker.notify_decision(...)` meng-enqueue satu command per keputusan (dry-run).
+- `test_15f`: assert write/read/all_off + status `DryRunPlcAdapter` (dulu send_clamp_*).
+- Test worker `test_plc_modbus_adapter` → `PlcWorkerInputPollingTest`: manual-release
+  IN1 butuh debounce stabil sebelum all-off; template-cycle IN2 sekali per debounce;
+  `notify_decision` meng-enqueue. Coverage worker terjaga.
 
-### R3 — `/inspection/plc/status` operator access is intended
-**Decision:** operators legitimately need to see PLC status.
-**Action taken:** RENAMED `test_15b` → `test_15b_plc_status_allows_operator_but_rejects_anonymous`;
-now asserts operator and admin get `200` and an unauthenticated caller gets `401`.
+### R3 — akses operator ke `/inspection/plc/status` memang disengaja
+**Keputusan:** operator memang butuh melihat status PLC.
+**Aksi yang diambil:** MENGGANTI NAMA `test_15b` → `test_15b_plc_status_allows_operator_but_rejects_anonymous`;
+sekarang assert operator dan admin dapat `200` dan pemanggil tanpa autentikasi dapat `401`.
 
-### R4 — Deployment is a single global active binding (no line/station slots)
-**Decision:** the global-binding redesign is intended.
-**Action taken:** REWROTE the two deployment tests to the new semantics:
-- `test_11b`: admin PUT re-binds the deployment to a new template version;
-  `/deployments/active` (no query params) returns the single active binding reflecting
-  the re-bound version; operator PUT still `403`.
+### R4 — Deployment adalah satu binding aktif global (tanpa slot line/station)
+**Keputusan:** redesign global-binding memang disengaja.
+**Aksi yang diambil:** MENULIS ULANG dua test deployment ke semantik baru:
+- `test_11b`: PUT admin mengikat ulang deployment ke version template baru;
+  `/deployments/active` (tanpa query params) mengembalikan satu binding aktif yang
+  mencerminkan version yang diikat ulang; PUT operator tetap `403`.
 - `test_11d` → `test_11d_get_active_returns_latest_of_multiple_active_deployments`:
-  deploying twice leaves both active; `get_active` returns the latest; both created IDs
-  appear active in the list (scoped by created IDs, not by removed slot fields).
+  deploy dua kali membuat keduanya tetap aktif; `get_active` mengembalikan yang
+  terbaru; kedua ID yang dibuat muncul aktif di list (di-scope berdasarkan ID yang
+  dibuat, bukan field slot yang sudah dihapus).
 
-### R5 — OCR sticker validation fully removed by design
-**Decision:** OCR is fully removed; sticker now validates presence/position/tilt, NOT
-code/content.
-**Action taken:** DELETED only the OCR-specific tests and PRESERVED the rest:
-- `test_sticker_detection_gates.py`: deleted `OcrAnchorPrimaryGateTest` and the OCR
-  cases of `StickerOnlyOcrGateTest`; kept the non-OCR tilt-normalization test (class
-  renamed `TiltNormalizationTest`); all tilt-gate / observability / backward-compat
-  classes untouched.
-- `test_sticker_inference.py`: deleted the two `_augment_with_*_ocr` payload tests; kept
-  the OCR text-normalization utility tests (`_normalize_ocr_text`, `_parse_unique_code`,
-  flip-fallback) which test helpers that still exist.
-A retirement note was added to `TESTING.md`.
-**Dead production code this leaves → FASE 1:** see section 6.
+### R5 — validasi OCR sticker dihapus total by design
+**Keputusan:** OCR dihapus total; sticker sekarang memvalidasi presence/posisi/tilt,
+BUKAN kode/isi.
+**Aksi yang diambil:** MENGHAPUS hanya test yang OCR-spesifik dan MEMPERTAHANKAN sisanya:
+- `test_sticker_detection_gates.py`: hapus `OcrAnchorPrimaryGateTest` dan kasus OCR
+  di `StickerOnlyOcrGateTest`; simpan test tilt-normalization non-OCR (class diganti
+  nama jadi `TiltNormalizationTest`); semua class tilt-gate / observability /
+  backward-compat tidak disentuh.
+- `test_sticker_inference.py`: hapus dua test payload `_augment_with_*_ocr`; simpan
+  test utility text-normalization OCR (`_normalize_ocr_text`, `_parse_unique_code`,
+  flip-fallback) yang menguji helper yang masih ada.
+Catatan pensiun ditambahkan ke `TESTING.md`.
+**Dead code produksi yang ditinggalkan → FASE 1:** lihat section 6.
 
 ---
 
-## 4. Other code-smells found (non-blocking, for later cleanup)
+## 4. Code-smell lain yang ditemukan (tidak menghalangi, untuk cleanup nanti)
 
-- **Defect evaluator dead branch / inf risk:** `DefectEvaluator`'s `w <= 0`
-  "empty crop" branch is effectively unreachable because `_parse_geometry` clamps
-  `w`/`h` to `>= 1` (`max(1, ...)`). Separately, `_aggregate_score` returns
-  `float("inf")` for an empty slice — if that value ever reaches `Decision.details`,
-  `json.dumps(..., allow_nan=False)` raises. Pinned by
+- **Branch mati / risiko inf di defect evaluator:** branch "empty crop" `w <= 0`
+  milik `DefectEvaluator` praktis tidak pernah tercapai karena `_parse_geometry`
+  membatasi `w`/`h` ke `>= 1` (`max(1, ...)`). Terpisah, `_aggregate_score`
+  mengembalikan `float("inf")` untuk slice kosong — kalau nilai itu sampai ke
+  `Decision.details`, `json.dumps(..., allow_nan=False)` melempar error. Dipatok oleh
   `test_evaluators.py::DefectEvaluatorTest::test_aggregate_score_empty_slice_is_infinite_and_leaks_to_json`.
-- **Sticker has no wired evaluator:** `registry.py` leaves `StickerEvaluator`
-  commented out (TODO B5); sticker still runs an inline path in
-  `InspectionSessionService._validate_sticker`. Pinned by
+- **Sticker belum punya evaluator yang terpasang:** `registry.py` membiarkan
+  `StickerEvaluator` di-comment out (TODO B5); sticker masih jalan lewat path
+  inline di `InspectionSessionService._validate_sticker`. Dipatok oleh
   `test_golden_templates.py::...::test_sticker_mode_normalizes_but_has_no_wired_evaluator`.
-  When B5 lands, update that test + this note.
-- **Cross-file test state pollution:** `test_07_admin_...` passes alone and in the
-  api-file-only run but was sensitive to full-suite ordering during triage. The api
-  suite shares a JSON store under `QC_SUITE_DATA_ROOT`; deployment/inspection tests
-  accumulate state. Not fixed here (would need per-test isolation across the 152 KB
-  file). Watch for flakiness.
+  Kalau B5 selesai, update test itu + catatan ini.
+- **Polusi state test lintas-file:** `test_07_admin_...` lolos sendirian dan saat
+  run api-file-only saja tapi sensitif terhadap urutan full-suite selama triage.
+  Suite api berbagi satu JSON store di bawah `QC_SUITE_DATA_ROOT`; test
+  deployment/inspection mengakumulasi state. Belum diperbaiki di sini (butuh
+  isolasi per-test lintas file 152 KB itu). Waspadai flakiness.
 
 ---
 
-## 5. New tests added (the safety net)
+## 5. Test baru yang ditambahkan (jaring pengaman)
 
-| File | Count | What it locks in |
+| File | Jumlah | Apa yang dikunci |
 | --- | --- | --- |
-| `backend/tests/test_templates_contract.py` | 28 | round-trip idempotency (all modes), legacy-only + criteria-only parse, `normalize_mode` aliases, min/max count semantics, `validate_criteria` messages |
-| `backend/tests/test_evaluators.py` | 25 | first direct coverage of `evaluators/*`: counter (in/out/foreign/multi-ROI), defect w/ scorer stub (all-OK/one-NG/model-fail/no-frame), sticker (pass/wrong-type/low-conf/disabled/not-found), registry unknown-mode, JSON-safety on every branch |
-| `backend/tests/test_golden_templates.py` | 7 | 3 golden fixtures parse+validate+dispatch; `Decision -> validation_details` intact + JSON-safe |
-| `backend/tests/fixtures/golden_template_{sticker,counter,defect}.json` | 3 | frozen template contracts for later phases |
+| `backend/tests/test_templates_contract.py` | 28 | idempotensi round-trip (semua mode), parse legacy-only + criteria-only, alias `normalize_mode`, semantik min/max count, pesan `validate_criteria` |
+| `backend/tests/test_evaluators.py` | 25 | coverage langsung pertama untuk `evaluators/*`: counter (in/out/foreign/multi-ROI), defect dengan stub scorer (all-OK/one-NG/model-fail/no-frame), sticker (pass/wrong-type/low-conf/disabled/not-found), registry unknown-mode, keamanan JSON di tiap branch |
+| `backend/tests/test_golden_templates.py` | 7 | 3 fixture golden parse+validate+dispatch; `Decision -> validation_details` utuh + JSON-safe |
+| `backend/tests/fixtures/golden_template_{sticker,counter,defect}.json` | 3 | kontrak template beku untuk fase berikutnya |
 
-Total new: **60 tests** (all green). After adjudication the PLC adapter/worker and
-deployment/plc-status tests were rewritten to the new behavior (section 3), so the
-final suite is **315 passed / 0 failed / 10 skipped**.
+Total baru: **60 test** (semua hijau). Setelah adjudikasi, test PLC adapter/worker
+dan deployment/plc-status ditulis ulang ke behavior baru (section 3), jadi suite
+final adalah **315 passed / 0 failed / 10 skipped**.
 
 ---
 
-## 6. FASE 1 DEAD-CODE CLEANUP (production — OUT OF MY REGION)
+## 6. PEMBERSIHAN DEAD-CODE FASE 1 (produksi — DI LUAR WILAYAH SAYA)
 
-The orchestrator's "intentional redesign" decisions leave dead production code that I
-must NOT touch (it lives under `backend/app/` / `shared/`). Capture for FASE 1:
+Keputusan "redesign disengaja" orkestrator meninggalkan dead code produksi yang
+TIDAK BOLEH saya sentuh (hidup di bawah `backend/app/` / `shared/`). Dicatat untuk
+FASE 1:
 
-### 6a. CONTRACT / RUNTIME — dead PLC Modbus settings (from R1)
-`backend/app/core/config.py` still DEFINES, and
-`backend/app/repositories/machine_settings_repository.py` still PERSISTS, settings the
-new minimal adapter ignores entirely:
+### 6a. CONTRACT / RUNTIME — pengaturan PLC Modbus yang mati (dari R1)
+`backend/app/core/config.py` masih MENDEFINISIKAN, dan
+`backend/app/repositories/machine_settings_repository.py` masih MENYIMPAN,
+pengaturan yang sama sekali diabaikan adapter minimal baru:
 - `plc_modbus_command_mode`
 - `plc_modbus_zero_based_addressing`
 - `plc_modbus_readback_mode`
-- hold/release addresses + expected hold/release values (readback pair)
+- alamat hold/release + nilai hold/release yang diharapkan (pasangan readback)
 
-These are now NO-OP settings. They will still render in the admin UI as if they do
-something. **FASE 1 action:** remove/reconcile these config fields + their persistence
-+ any admin-UI widgets that expose them, so the settings surface matches the adapter.
+Ini sekarang jadi pengaturan NO-OP. Tetap muncul di admin UI seolah-olah
+berfungsi. **Aksi FASE 1:** hapus/rekonsiliasi field config ini + persistensinya
++ widget admin-UI mana pun yang menampilkannya, supaya permukaan pengaturan
+sesuai dengan adapter.
 
-### 6b. RUNTIME — dead OCR reads in sticker inference (from R5)
-`backend/app/services/sticker_inference.py` still READS removed fields via
-`getattr(sticker_rule, "use_ocr", False)`, `getattr(..., "ocr_expected_code", ...)`,
-`getattr(..., "expected_dot_x/y", ...)` — always the defaults now, since `StickerRule`
-dropped those fields and `templates._VALID_STICKER_FIELDS` strips them on parse. And
-`_resolve_ocr_engine()` is hardcoded `return "disabled"`. The
-`_augment_with_anchor_ocr` / `_augment_with_ocr_only` code paths (and any OCR path in
-`InspectionSessionService._validate_sticker`) are now dead. **FASE 1 action:** delete
-the dead OCR reads/methods now that OCR is officially removed. (`StickerEvaluator` also
-still has OCR-shaped `additional` handling that is moot — see it when wiring B5.)
+### 6b. RUNTIME — pembacaan OCR mati di sticker inference (dari R5)
+`backend/app/services/sticker_inference.py` masih MEMBACA field yang sudah
+dihapus lewat `getattr(sticker_rule, "use_ocr", False)`,
+`getattr(..., "ocr_expected_code", ...)`, `getattr(..., "expected_dot_x/y", ...)`
+— sekarang selalu default, karena `StickerRule` sudah membuang field itu dan
+`templates._VALID_STICKER_FIELDS` membuangnya saat parse. Dan
+`_resolve_ocr_engine()` di-hardcode `return "disabled"`. Path kode
+`_augment_with_anchor_ocr` / `_augment_with_ocr_only` (dan path OCR mana pun di
+`InspectionSessionService._validate_sticker`) sekarang mati. **Aksi FASE 1:**
+hapus pembacaan/method OCR yang mati sekarang OCR resmi dihapus.
+(`StickerEvaluator` juga masih punya handling `additional` berbentuk-OCR yang
+sudah tidak relevan — lihat saat memasang B5.)
 
-### 6c. RUNTIME — PLC hardening targets the NEW design (note for FASE 1)
-The "Ketahanan PLC" / PLC-resilience hardening must target the NEW minimal
-accept-pulse + input-polling model (`ModbusTcpPlcAdapter.write_coil`/`read_inputs`,
-`PlcWorker` accept-pulse + `_poll_inputs` + strategy). **There is no clamp/hold/release
-or readback API to harden** — do not design hardening around the removed API.
+### 6c. RUNTIME — hardening PLC menyasar desain BARU (catatan untuk FASE 1)
+Hardening "Ketahanan PLC" harus menyasar model minimal accept-pulse +
+input-polling yang BARU (`ModbusTcpPlcAdapter.write_coil`/`read_inputs`,
+`PlcWorker` accept-pulse + `_poll_inputs` + strategy). **Tidak ada API
+clamp/hold/release atau readback untuk di-harden** — jangan desain hardening
+mengelilingi API yang sudah dihapus.
 
-### 6d. Non-blocking code-smells still open (from section 4)
-- `DefectEvaluator` `w<=0` empty-crop branch is dead (geometry clamps to ≥1px);
-  `_aggregate_score` returns `float("inf")` on empty slices (JSON-unsafe if it ever
-  reaches `Decision.details`). Pinned by a test.
-- `StickerEvaluator` is still not wired into `registry.py` (TODO B5); sticker uses the
-  inline `_validate_sticker` path. Pinned by a test.
-- api_smoke cross-file shared state under `QC_SUITE_DATA_ROOT` — watch for flakiness.
+### 6d. Code-smell tidak menghalangi yang masih terbuka (dari section 4)
+- Branch empty-crop `w<=0` `DefectEvaluator` mati (geometry membatasi ke ≥1px);
+  `_aggregate_score` mengembalikan `float("inf")` pada slice kosong (JSON-unsafe
+  kalau sampai ke `Decision.details`). Dipatok test.
+- `StickerEvaluator` masih belum terpasang di `registry.py` (TODO B5); sticker
+  pakai path inline `_validate_sticker`. Dipatok test.
+- state bersama lintas-file api_smoke di bawah `QC_SUITE_DATA_ROOT` — waspadai
+  flakiness.
 
 ---
 
-## 7. FASE 1 EXECUTED — dead-code cleanup (2026-09-18)
+## 7. FASE 1 DIEKSEKUSI — pembersihan dead-code (2026-09-18)
 
-Section 6 items were executed, plus further dead code found by a full-repo
-reachability scan (see `.claude/DEAD_CODE_INVENTORY.md` for the verified list).
-**58 files, −8.6k lines.** Suite after cleanup: `pytest backend/tests` →
-**304 passed, 2 failed (pre-existing `test_00b`, `test_04d`), 10 skipped**.
+Item section 6 dieksekusi, plus dead code lain yang ditemukan lewat scan
+reachability full-repo (lihat `.claude/DEAD_CODE_INVENTORY.md` untuk daftar
+terverifikasi). **58 file, −8.6k baris.** Suite setelah cleanup:
+`pytest backend/tests` → **304 passed, 2 failed (pre-existing `test_00b`,
+`test_04d`), 10 skipped**.
 
-### 7a. Production code removed
-- **6a** PLC hold/release/readback env keys removed from `deploy/.env.example`
-  (the code had already gone; `README` Modbus section rewritten for the
-  accept-pulse + input-polling design).
-- **6b** OCR: all 17 OCR methods in `StickerInferenceService`, `_validate_ocr_anchor`,
+### 7a. Kode produksi yang dihapus
+- **6a** Kunci env hold/release/readback PLC dihapus dari `deploy/.env.example`
+  (kodenya sudah hilang lebih dulu; section Modbus `README` ditulis ulang untuk
+  desain accept-pulse + input-polling).
+- **6b** OCR: semua 17 method OCR di `StickerInferenceService`, `_validate_ocr_anchor`,
   `_validate_sticker_ocr_only`, `_normalize_code`, `_ocr_validation_fields`,
-  `_normalize_tilt_180` in `InspectionSessionService`; `anchor`/`ocr`/`geometry`
-  keys dropped from the `sticker_detection` payload; `pytesseract` dependency;
-  `ocr_runtime` health check; `ocr_*` CSV export columns.
-- Part-ready `color_profile` / `hsv` methods and the whole Calibration feature
+  `_normalize_tilt_180` di `InspectionSessionService`; key `anchor`/`ocr`/`geometry`
+  dibuang dari payload `sticker_detection`; dependency `pytesseract`; health check
+  `ocr_runtime`; kolom export CSV `ocr_*`.
+- Method `color_profile` / `hsv` part-ready dan seluruh fitur Calibration
   (`calibration_routes.py`, `services/calibration.py`, `profiles_repository.py`,
-  admin Calibration tab, `ApiClient` profile wrappers). The dispatcher only ever
-  accepted `mean_std_threshold` / `gap_template_match`, and the admin tab called
-  `ApiClient` methods that did not exist.
-- WebSocket streaming sidecar (`backend/app/streaming/`, `client_tk/.../frame_stream.py`,
-  `shared/contracts/streaming.py`, `stream_host/port`, `websockets` dependency) —
-  the client never connected to it.
-- SQL mirrors with no importer: `postgres/sqlserver session_store.py`,
+  tab Calibration admin, wrapper profile `ApiClient`). Dispatcher-nya cuma pernah
+  menerima `mean_std_threshold` / `gap_template_match`, dan tab admin memanggil
+  method `ApiClient` yang tidak ada.
+- Sidecar streaming WebSocket (`backend/app/streaming/`, `client_tk/.../frame_stream.py`,
+  `shared/contracts/streaming.py`, `stream_host/port`, dependency `websockets`) —
+  client tidak pernah terhubung ke situ.
+- SQL mirror tanpa importer: `postgres/sqlserver session_store.py`,
   `*/auth_audit_repository.py`, `sqlserver/inspection_results_repository.py`.
-- `shared/contracts/inspection.py`, `repositories/filesystem/`, old
-  `TemplateEditorForm`/`StatCard`/`JsonEditor` in `template_forms.py`, and ~40
-  unreferenced methods across `plc_worker`, `gap_detector`, `text_tilt`,
-  `dataset_versions_repository`, operator/admin views and components.
+- `shared/contracts/inspection.py`, `repositories/filesystem/`,
+  `TemplateEditorForm`/`StatCard`/`JsonEditor` lama di `template_forms.py`, dan
+  ~40 method tak-terpakai di `plc_worker`, `gap_detector`, `text_tilt`,
+  `dataset_versions_repository`, view dan komponen operator/admin.
 
-### 7b. Bugs fixed while removing "unreachable" code
-- `TemplatesRepository.list_versions` and `UsersRepository.set_role` had lost their
-  `def` lines (bodies were sitting unreachable after a `raise` in the previous
-  method). `POST /auth/users/<id>/role` (used by the Admin Operators tab) and
-  `GET /templates/<id>/versions` raised `AttributeError`. Headers restored.
-- `InspectionSessionService._advance_event_state` was defined twice; the first
-  (truncated) definition was deleted.
-- `scripts/smoke_api.py` logged in as `engineer/engineer123`, a user that has not
-  been seeded since the role was removed; it now uses the admin token. It still
-  stops at the frame decision without the real sticker model (same limitation as
-  the skipped api_smoke tests, §2b).
+### 7b. Bug yang diperbaiki saat menghapus kode "tak terjangkau"
+- `TemplatesRepository.list_versions` dan `UsersRepository.set_role` kehilangan
+  baris `def`-nya (body-nya jadi tak terjangkau setelah `raise` di method
+  sebelumnya). `POST /auth/users/<id>/role` (dipakai tab Admin Operators) dan
+  `GET /templates/<id>/versions` melempar `AttributeError`. Header dipulihkan.
+- `InspectionSessionService._advance_event_state` didefinisikan dua kali; definisi
+  pertama (terpotong) dihapus.
+- `scripts/smoke_api.py` login sebagai `engineer/engineer123`, user yang sudah
+  tidak di-seed sejak role itu dihapus; sekarang pakai token admin. Masih
+  berhenti di keputusan frame tanpa model sticker asli (keterbatasan yang sama
+  dengan test api_smoke yang di-skip, §2b).
 
-### 7c. Tests deleted (obsolete tests for removed features)
+### 7c. Test yang dihapus (test usang untuk fitur yang dihapus)
 - `test_api_smoke.py`: `test_00a2_calibration_rejects_tiny_roi_profile`,
   `test_00a3_profile_create_rejects_tiny_sampling_meta`,
-  `test_02_part_ready_color_gate_blocks_commit_until_match` (was skipped),
+  `test_02_part_ready_color_gate_blocks_commit_until_match` (sudah di-skip),
   `test_08b_admin_can_update_calibration_profile`,
-  `test_08c_operator_cannot_update_calibration_profile`; calibration setup blocks
-  trimmed from `test_05` and `test_08`.
-- `test_sticker_inference.py`: the three OCR helper tests
+  `test_08c_operator_cannot_update_calibration_profile`; blok setup calibration
+  dipangkas dari `test_05` dan `test_08`.
+- `test_sticker_inference.py`: tiga test helper OCR
   (`normalize_ocr_text`, `parse_unique_code`, `_ocr_with_flip_fallback`).
 - `test_sticker_detection_gates.py`: `TiltNormalizationTest` (`_normalize_tilt_180`).
-- `client_tk/tests/test_ui_smoke.py`: 70 tests that targeted the removed
-  `EngineerScreen`, calibration UI and `TemplateEditorForm`; 23 remain.
+- `client_tk/tests/test_ui_smoke.py`: 70 test yang menyasar `EngineerScreen`
+  yang sudah dihapus, UI calibration dan `TemplateEditorForm`; 23 tersisa.
 
-### 7d. Known state of the remaining UI smoke tests (pre-existing, not fixed)
-- Every `test_admin_*` hangs on `AdminScreen` construction under the stub API.
+### 7d. State test UI smoke yang tersisa (pre-existing, belum diperbaiki)
+- Setiap `test_admin_*` hang di konstruksi `AdminScreen` di bawah stub API.
 - `test_operator_layout_switches_to_compact`, `test_operator_in2_cycles_template_dropdown`,
-  `test_operator_load_deployment_keeps_deployment_version` fail on HEAD too
-  (`line_value` attribute / layout row drift). Run with `-k "not test_admin_"`.
+  `test_operator_load_deployment_keeps_deployment_version` gagal di HEAD juga
+  (drift attribute `line_value` / baris layout). Jalankan dengan `-k "not test_admin_"`.
 
-### 7e. Still open — needs a product decision
-- `CounterFlow` + MachineSettings `counter` section: `set_validator_mode` is always
-  called with `"sticker"`, so it never activates.
-- `StickerEvaluator` (TODO B5) still not registered.
-- Workstation heartbeat is written by the operator screen but nothing reads
+### 7e. Masih terbuka — butuh keputusan produk
+- `CounterFlow` + section `counter` MachineSettings: `set_validator_mode` selalu
+  dipanggil dengan `"sticker"`, jadi tidak pernah aktif.
+- `StickerEvaluator` (TODO B5) masih belum terdaftar.
+- Heartbeat workstation ditulis oleh layar operator tapi tidak ada yang membaca
   `/workstations`.
-- 30+ backend routes have no UI caller (inspections PATCH/DELETE, template/deployment
-  rollback, audit-log, defect-calibrate, model transition, …).
-- Placebo settings: MachineSettings `connection` section, `clamp_hold_ms`,
-  `relay_spare_address`, `clamp_feedback_timeout_ms/fallback_delay_ms`; template
-  fields `stream_fps`, `enable_ergonomic_check`/`ergonomic_*`, `logo_ref_path`,
+- 30+ route backend tidak punya pemanggil UI (inspections PATCH/DELETE, rollback
+  template/deployment, audit-log, defect-calibrate, transisi model, …).
+- Pengaturan placebo: section `connection` MachineSettings, `clamp_hold_ms`,
+  `relay_spare_address`, `clamp_feedback_timeout_ms/fallback_delay_ms`; field
+  template `stream_fps`, `enable_ergonomic_check`/`ergonomic_*`, `logo_ref_path`,
   `calibration_*`, `gap_ref_type`, `gap_hsv_*`, `gap_padding_px`,
   `commit_stable_frames`, `part_ready_settle_frames`, `color_profile_id`,
-  `hsv_lower/upper` are persisted and shown but never read by the pipeline.
+  `hsv_lower/upper` disimpan dan ditampilkan tapi tidak pernah dibaca pipeline.
 
 ---
 
-## 8. Sticker-only + JSON-only config (2026-09-18, same day as §7)
+## 8. Config sticker-only + JSON-only (2026-09-18, hari yang sama dengan §7)
 
-User decisions: (1) QC Sticker is the only validation mode — delete counter/defect;
-(2) drop the max-tilt field and the rotation controls (camera and per-ROI) because
-they are unused; (3) everything editable in Admin → Machine Settings lives in
-`machine_settings.json` only, `.env` keeps secrets + bootstrap, the rest is hardcoded.
-Suite after: **243 passed, 2 failed (pre-existing `test_00b`, `test_04d`), 9 skipped**.
+Keputusan user: (1) QC Sticker adalah satu-satunya mode validasi — hapus
+counter/defect; (2) buang field max-tilt dan kontrol rotasi (camera dan per-ROI)
+karena tidak dipakai; (3) semua yang bisa diedit di Admin → Machine Settings
+hidup di `machine_settings.json` saja, `.env` cuma menyimpan secrets +
+bootstrap, sisanya hardcode. Suite setelahnya: **243 passed, 2 failed
+(pre-existing `test_00b`, `test_04d`), 9 skipped**.
 
-### 8a. Removed
-- Tilt subsystem: `services/text_tilt.py`, `_estimate_tilt_from_roi`, tilt telemetry
-  and the `OUT_OF_ANGLE` gate in `_validate_sticker`, `StickerRule.expected_tilt_degrees /
-  max_tilt_degrees / tilt_gate_enabled / edge_* / morph_* / white_hsv_* /
-  min_text_*`, the Templates-tab "Max Tilt" + "Aktifkan cek miring" widgets.
-  `INSPECT_HARD_REJECT_REASONS` is now the constant `"WRONG_TYPE"`. The enum value
-  `OUT_OF_ANGLE` stays for old records.
-- Rotation: `CameraDefaults.rotation_degrees`, `_apply_rotation`, the session
-  `camera_rotation_degrees` override, `QC_SUITE_CAMERA_DEFAULT_ROTATION_DEGREES`,
-  `RoiGeometry.rotation`, the ROI-picker "Rotasi ROI" spinbox, rotated overlay
-  drawing on both screens, `_crop_stage_roi` / `save_ref_patch` warps.
-- Counter / defect modes: `services/evaluators/` (whole package incl. the never-wired
-  `StickerEvaluator`), `anomaly_backend.py`, `counter_flow.py`, `defect_flow.py`,
-  `ng_cache_logger.py`, `POST /templates/<id>/defect-calibrate`, `InspectionTemplate.mode /
+### 8a. Dihapus
+- Subsistem tilt: `services/text_tilt.py`, `_estimate_tilt_from_roi`, telemetri
+  tilt dan gate `OUT_OF_ANGLE` di `_validate_sticker`,
+  `StickerRule.expected_tilt_degrees / max_tilt_degrees / tilt_gate_enabled /
+  edge_* / morph_* / white_hsv_* / min_text_*`, widget tab Templates "Max Tilt" +
+  "Aktifkan cek miring". `INSPECT_HARD_REJECT_REASONS` sekarang jadi konstanta
+  `"WRONG_TYPE"`. Nilai enum `OUT_OF_ANGLE` tetap ada untuk record lama.
+- Rotasi: `CameraDefaults.rotation_degrees`, `_apply_rotation`, override session
+  `camera_rotation_degrees`, `QC_SUITE_CAMERA_DEFAULT_ROTATION_DEGREES`,
+  `RoiGeometry.rotation`, spinbox ROI-picker "Rotasi ROI", gambar overlay
+  ter-rotasi di kedua layar, warp `_crop_stage_roi` / `save_ref_patch`.
+- Mode counter / defect: `services/evaluators/` (seluruh paket termasuk
+  `StickerEvaluator` yang tidak pernah terpasang), `anomaly_backend.py`,
+  `counter_flow.py`, `defect_flow.py`, `ng_cache_logger.py`,
+  `POST /templates/<id>/defect-calibrate`, `InspectionTemplate.mode /
   criteria / component_rois`, `ComponentClassTarget`, `ComponentRoiRule`,
   `normalize_mode`, `validate_criteria` (→ `validate_sticker_rule`),
-  `StickerRule.validator_mode` + `ROI_CLASS_VALIDATOR_MODES`, the `ACCEPT_CANDIDATE`
-  stabilising branch, counter/defect reason codes, `client_tk/app/mode_utils.py`,
-  the mode radio + component/defect ROI editors in the Templates tab, counter/defect
-  overlays on the operator screen, the "Mode" column in both admin tables,
-  `MachineSettings.counter`. `SessionState` lost `component_count_history`,
-  `consecutive_component_ok`, `expected_logo_edge`, `hsv_adaptive_*`.
-- Placebo fields: `VisionConfig.stream_fps / enable_ergonomic_check / ergonomic_* /
-  text_anchor_class / center_dot_class / anchor_crop_*`, `PartReadyConfig.gap_ref_type /
-  gap_hsv_* / gap_padding_px / color_profile_id / colorspace / distance_threshold /
-  hsv_* / hsv_adaptive* / calibration_* / logo_ref_path`, `RoiGeometry.width`,
-  `StickerRule.commit_stable_frames / part_ready_settle_frames`,
-  `TimingConfig.hard_reject_stable_frames / hard_reject_stable_ms` (no consumer once
-  the counter hard-reject branch went), `io.relay_spare_address / clamp_hold_ms /
+  `StickerRule.validator_mode` + `ROI_CLASS_VALIDATOR_MODES`, branch
+  penstabil `ACCEPT_CANDIDATE`, reason code counter/defect,
+  `client_tk/app/mode_utils.py`, radio mode + editor ROI component/defect di tab
+  Templates, overlay counter/defect di layar operator, kolom "Mode" di kedua
+  tabel admin, `MachineSettings.counter`. `SessionState` kehilangan
+  `component_count_history`, `consecutive_component_ok`, `expected_logo_edge`,
+  `hsv_adaptive_*`.
+- Field placebo: `VisionConfig.stream_fps / enable_ergonomic_check /
+  ergonomic_* / text_anchor_class / center_dot_class / anchor_crop_*`,
+  `PartReadyConfig.gap_ref_type / gap_hsv_* / gap_padding_px / color_profile_id /
+  colorspace / distance_threshold / hsv_* / hsv_adaptive* / calibration_* /
+  logo_ref_path`, `RoiGeometry.width`, `StickerRule.commit_stable_frames /
+  part_ready_settle_frames`, `TimingConfig.hard_reject_stable_frames /
+  hard_reject_stable_ms` (tidak ada konsumen sejak branch hard-reject counter
+  hilang), `io.relay_spare_address / clamp_hold_ms /
   clamp_feedback_timeout_ms / clamp_feedback_fallback_delay_ms`.
 
-### 8b. Config model
-- `.env` (see `deploy/.env.example`): `QC_SUITE_ENV`, `QC_SUITE_SECRET_KEY`,
+### 8b. Model config
+- `.env` (lihat `deploy/.env.example`): `QC_SUITE_ENV`, `QC_SUITE_SECRET_KEY`,
   `QC_SUITE_DATA_ROOT`, `QC_SUITE_LOCAL_ONLY`, `QC_SUITE_SERVER_URL`, `QC_SUITE_HOST`,
   `QC_SUITE_PORT`, `QC_SUITE_DEBUG`, `QC_SUITE_DATABASE_BACKEND` + `POSTGRESQL_*` /
-  `MSSQL_*`, and the client camera/upload keys. **58 `QC_SUITE_*` keys are no longer
-  read** (all `PLC_*`, all timing, `STICKER_INFERENCE_MODE`, `DEFAULT_STICKER_MODEL_*`,
-  `DEVICE`, `CUDA_DEVICE_ID`, `INFERENCE_*`, `TRAINING_*`, `PUSH_WORKER_*`, `GPU_FAIL_FAST`,
-  `ACCESS_LOGS_ENABLED`, `WERKZEUG_*`, `SQL_ENABLED`, `ACCESS_TOKEN_TTL_SECONDS`,
-  `NG_LOG_DIR`, `GEOMETRIC_AUGMENT_ENABLED`, `PART_READY_*`, `INSPECT_HARD_REJECT_REASONS`).
-- `machine_settings.json` v2: `connection`, `io` (v1 `sticker` is read as `io`),
-  `timing`, `inference` (`mode`, `device`, `cuda_device_id`, `num_threads`, `timeout_s`,
-  `default_model_path`, `default_model_meta_path`). `MachineSettingsRepository` has no
-  seed logic; `POST /machine-settings/seed` and the "Re-seed from .env" button are gone.
-- `AppConfig` keeps the same attribute names for services; `apply_machine_settings()`
-  fills them at boot. Fixed constants: `TRAINING_*`, `PUSH_WORKER_*`, `GPU_FAIL_FAST=True`,
-  `TRAINING_WEIGHTS_DOWNLOAD_ALLOWED=True`, `GEOMETRIC_AUGMENT_ENABLED=False`,
-  `ACCESS_TOKEN_TTL_SECONDS=86400`; access/werkzeug logs follow `QC_SUITE_DEBUG`.
-- `ModelsRepository` / `TemplatesRepository` take `default_model_path` / `default_meta_path`
-  constructor args (container passes `inference.*`) instead of import-time constants.
+  `MSSQL_*`, dan kunci camera/upload client. **58 kunci `QC_SUITE_*` sudah tidak
+  dibaca lagi** (semua `PLC_*`, semua timing, `STICKER_INFERENCE_MODE`,
+  `DEFAULT_STICKER_MODEL_*`, `DEVICE`, `CUDA_DEVICE_ID`, `INFERENCE_*`, `TRAINING_*`,
+  `PUSH_WORKER_*`, `GPU_FAIL_FAST`, `ACCESS_LOGS_ENABLED`, `WERKZEUG_*`,
+  `SQL_ENABLED`, `ACCESS_TOKEN_TTL_SECONDS`, `NG_LOG_DIR`,
+  `GEOMETRIC_AUGMENT_ENABLED`, `PART_READY_*`, `INSPECT_HARD_REJECT_REASONS`).
+- `machine_settings.json` v2: `connection`, `io` (v1 `sticker` dibaca sebagai
+  `io`), `timing`, `inference` (`mode`, `device`, `cuda_device_id`, `num_threads`,
+  `timeout_s`, `default_model_path`, `default_model_meta_path`).
+  `MachineSettingsRepository` tidak punya logika seeding; `POST
+  /machine-settings/seed` dan tombol "Re-seed from .env" sudah hilang.
+- `AppConfig` menjaga nama attribute yang sama untuk services;
+  `apply_machine_settings()` mengisinya saat boot. Konstanta tetap: `TRAINING_*`,
+  `PUSH_WORKER_*`, `GPU_FAIL_FAST=True`, `TRAINING_WEIGHTS_DOWNLOAD_ALLOWED=True`,
+  `GEOMETRIC_AUGMENT_ENABLED=False`, `ACCESS_TOKEN_TTL_SECONDS=86400`; log
+  access/werkzeug mengikuti `QC_SUITE_DEBUG`.
+- `ModelsRepository` / `TemplatesRepository` menerima argumen constructor
+  `default_model_path` / `default_meta_path` (container mengoper `inference.*`)
+  alih-alih konstanta saat import.
 - `PlcWorker(adapter, *, num_channels, dry_run)` + `apply_machine_settings(settings)`
-  replace the old constructor kwargs / `set_validator_mode` / `configure_guards`.
-  `build_plc_adapter(PlcConnectionConfig)`. `TrainingWorker._training_mode` is a
-  property that reads `app_config.training_engine_mode` at job time (tests set it on
+  menggantikan kwargs constructor lama / `set_validator_mode` /
+  `configure_guards`. `build_plc_adapter(PlcConnectionConfig)`.
+  `TrainingWorker._training_mode` adalah property yang membaca
+  `app_config.training_engine_mode` saat job berjalan (test men-set-nya di
   `container.app_config`).
 
-### 8c. Tests
-- Deleted: `test_evaluators.py`, `fixtures/golden_template_{counter,defect}.json`,
+### 8c. Test
+- Dihapus: `test_evaluators.py`, `fixtures/golden_template_{counter,defect}.json`,
   `test_api_smoke::test_04b_roi_class_validator_mode_ignores_position_gate`,
   `test_api_smoke::test_13g_commit_stable_frames_does_not_override_settle_ms`,
-  `test_training_metrics::LoggingToggleConfigTest`, `TiltGateToggleTest` (13 tests).
-- Rewritten: `test_golden_templates.py` (sticker fixture only; asserts legacy keys are
-  dropped), `test_templates_contract.py` (sticker-only contract),
-  `test_sticker_detection_gates.py::StickerValidateGateTest` (3 tests: accept,
-  WRONG_TYPE, LOW_ROI_CONF), `test_plc_modbus_adapter.py` / `test_plc_worker_feedback.py`
-  (new worker API), `test_training_metrics::test_gpu_job_does_not_fail_when_gpu_fail_fast_disabled`
-  (sets the attribute instead of env). `test_api_smoke.py` writes a
-  `machine_settings.json` (inference mode `classic`, PLC off) into its temp data root
-  before importing the app and sets `training_engine_mode="simulated"` on the container
-  config — the env vars it used to set are gone.
+  `test_training_metrics::LoggingToggleConfigTest`, `TiltGateToggleTest` (13 test).
+- Ditulis ulang: `test_golden_templates.py` (cuma fixture sticker; assert key
+  legacy dibuang), `test_templates_contract.py` (kontrak sticker-only),
+  `test_sticker_detection_gates.py::StickerValidateGateTest` (3 test: accept,
+  WRONG_TYPE, LOW_ROI_CONF), `test_plc_modbus_adapter.py` /
+  `test_plc_worker_feedback.py` (API worker baru),
+  `test_training_metrics::test_gpu_job_does_not_fail_when_gpu_fail_fast_disabled`
+  (set attribute alih-alih env). `test_api_smoke.py` menulis satu
+  `machine_settings.json` (mode inference `classic`, PLC off) ke temp data
+  root-nya sebelum mengimpor app dan men-set `training_engine_mode="simulated"`
+  di config container — env var yang dulu di-set-nya sudah hilang.
 
-### 8d. Migration notes for a production PC
-- Existing v1 `machine_settings.json` files load unchanged (`sticker`→`io`, `counter`
-  ignored). Values that used to come from `.env` and were never saved to the JSON
-  (typically the `inference` section, and `connection` on PCs where the JSON was seeded
-  with `enabled=false`) now use defaults until set in Admin → Machine Settings.
-- **`connection` is authoritative now.** On this dev machine the JSON says
-  `enabled=true, dry_run=false, transport=fx, COM3` — booting will open the FX port for
-  real and, without the PLC, block commits with `plc_unhealthy_commit_blocked`. Set
-  `dry_run` or `enabled` in the tab (or edit the JSON) before running here.
-- Templates with `vision.model_path` set are unaffected; templates that relied on the env
-  default model need `inference.default_model_path` filled in the tab once.
+### 8d. Catatan migrasi untuk PC produksi
+- File `machine_settings.json` v1 yang sudah ada tetap load tanpa perubahan
+  (`sticker`→`io`, `counter` diabaikan). Nilai yang dulu datang dari `.env` dan
+  tidak pernah disimpan ke JSON (biasanya section `inference`, dan `connection`
+  di PC yang JSON-nya di-seed dengan `enabled=false`) sekarang pakai default
+  sampai di-set di Admin → Machine Settings.
+- **`connection` sekarang otoritatif.** Di mesin dev ini JSON-nya bilang
+  `enabled=true, dry_run=false, transport=fx, COM3` — booting akan membuka port
+  FX secara nyata dan, tanpa PLC, memblokir commit dengan
+  `plc_unhealthy_commit_blocked`. Set `dry_run` atau `enabled` di tab (atau edit
+  JSON-nya) sebelum menjalankan di sini.
+- Template dengan `vision.model_path` yang sudah di-set tidak terpengaruh;
+  template yang mengandalkan model default dari env perlu
+  `inference.default_model_path` diisi di tab sekali.
 
-## 9. Data + Training removed; model import made real (2026-09-18, same day as §7/§8)
+## 9. Data + Training dihapus; import model dibuat nyata (2026-09-18, hari yang sama dengan §7/§8)
 
-User decision: training happens in other software. This app only **imports finished
-models**; the important case is an Ultralytics OpenVINO export folder zipped as-is,
-which must land in `data/models/<name>/` automatically. Suite after:
-**backend 176 passed, 2 failed (pre-existing `test_00b`, `test_04d`), 7 skipped** (incl. §9d–§9f);
-client unit tests 9 passed. Production code is now ~21.5k lines (was 26.9k after §8).
+Keputusan user: training terjadi di software lain. App ini cuma
+**mengimpor model jadi**; kasus penting-nya adalah folder export Ultralytics
+OpenVINO yang di-zip apa adanya, yang harus mendarat otomatis di
+`data/models/<name>/`. Suite setelahnya: **backend 176 passed, 2 failed
+(pre-existing `test_00b`, `test_04d`), 7 skipped** (termasuk §9d–§9f); test unit
+client 9 passed. Kode produksi sekarang ~21.5k baris (dulu 26.9k setelah §8).
 
-### 9a. Removed
+### 9a. Dihapus
 - Backend: `repositories/{datasets,dataset_versions,augment,training}_repository.py`,
   `workers/{training,augment}_worker.py`, `services/training.py`,
   `core/label_geometry.py`, `core/model_catalog.py`, `shared/contracts/augment.py`;
-  all `/datasets*`, `/augment*`, `/train*` routes (`workstation_routes.py` keeps only
-  `/models*` and `/workstations*`); `container.py` no longer starts `AugmentWorker`;
-  `config.py` lost `DATASETS_DIR`, `TRAINING_*`, `GPU_FAIL_FAST`,
-  `TRAINING_WEIGHTS_DOWNLOAD_ALLOWED`, `GEOMETRIC_AUGMENT_ENABLED`;
-  `ModelsRepository.add_model` lost `architecture_*`, `source_dataset_id`,
-  `training_job_id` (old registry rows keep whatever they had — nothing reads it).
-- Client: Admin tabs **Data** and **Training** (`_build_data_tab`, `_build_training_tab`,
-  every `_admin_annot_*` / dataset / augment / training handler, ~1.3k lines),
-  `components/annotation_canvas.py`, the dataset/annotation/augment/training wrappers
-  in `api_client.py`. Tab order is now Templates · Models · Operators · Monitor ·
-  Machine Settings.
-- `scripts/smoke_api.py` no longer creates a dataset; `scripts/bootstrap_env.py` no
-  longer expects `data/datasets/`.
+  semua route `/datasets*`, `/augment*`, `/train*` (`workstation_routes.py` cuma
+  menyisakan `/models*` dan `/workstations*`); `container.py` tidak lagi
+  menjalankan `AugmentWorker`; `config.py` kehilangan `DATASETS_DIR`,
+  `TRAINING_*`, `GPU_FAIL_FAST`, `TRAINING_WEIGHTS_DOWNLOAD_ALLOWED`,
+  `GEOMETRIC_AUGMENT_ENABLED`; `ModelsRepository.add_model` kehilangan
+  `architecture_*`, `source_dataset_id`, `training_job_id` (baris registry lama
+  menyimpan apa pun yang sudah dimilikinya — tidak ada yang membacanya).
+- Client: tab Admin **Data** dan **Training** (`_build_data_tab`,
+  `_build_training_tab`, tiap handler `_admin_annot_*` / dataset / augment /
+  training, ~1.3k baris), `components/annotation_canvas.py`, wrapper
+  dataset/annotation/augment/training di `api_client.py`. Urutan tab sekarang
+  Templates · Models · Operators · Monitor · Machine Settings.
+- `scripts/smoke_api.py` tidak lagi membuat dataset; `scripts/bootstrap_env.py`
+  tidak lagi mengharapkan `data/datasets/`.
 
-### 9b. Model import / export (rewritten `services/model_export_service.py`)
-- `POST /models/import` (`zip_file` multipart or `content_b64` JSON; optional `name`,
-  `target_lifecycle`, `skip_validation`, `force_rename`) accepts any zip with **exactly
-  one** model at any depth: `.xml`+`.bin` (OpenVINO), `.pt`, `.onnx`, `.tflite`.
-  Class names come from `<stem>.meta.json` / `metadata.json` (`class_names` or
-  `names`) or Ultralytics `metadata.yaml` (`names:` map). `__MACOSX/` and dot-entries
-  are ignored. Legacy v1 exports (`weights.pt` + `metadata.json` + `EXPORT_MANIFEST.json`)
-  still import, with checksum validation.
-- Every import lands in its own folder `data/models/<safe name>[_N]/` and always gets a
-  `<stem>.meta.json` written (`class_names`, `runtime`, `name`, `source_archive`,
-  `imported_at`) — that file is the **only** place the ONNX/OpenVINO/TFLite backends
-  read class names from. Missing names → import succeeds with a warning and numeric
-  labels. The registry row has `source="import"`, `runtime` from the extension,
-  `meta_path` set. Failure anywhere rolls back the folder and the registry row.
-- Name resolution: explicit `name` → manifest/metadata name → top folder in the zip →
-  archive filename. A clash gets ` [IMPORTED <ts>]`; the folder gets `_N`.
-- `POST /models/<id>/export` zips `<name>/<all files in the model folder>` +
-  `<name>/metadata.json` + `EXPORT_MANIFEST.json` (export_version `2.0`); an exported
-  zip re-imports on another PC unchanged (round-trip test).
-- `POST /models/upload` (single file, base64) now also writes `<stem>.meta.json` when
-  `class_names` are sent; the client reads a sibling `metadata.yaml` /
-  `<stem>.meta.json` next to the chosen file and sends them.
-- `DELETE /models/<id>?purge_files=1` calls `StickerInferenceService.unload_model()`
-  first (OpenVINO memory-maps the `.bin`; on Windows the folder cannot be deleted while
-  compiled) and reports only what was really removed, plus `purge_warning` when files
-  stayed behind.
-- Client Models tab: new **Import Model Archive (.zip)** section (optional name →
-  `import_model_archive`, runs async, shows runtime/folder/classes/warnings);
-  **Export** now asks for a save path and writes the bytes (it used to discard them and
-  say "Export started.").
-- `openvino>=2024.0,<2026.0` added to `pyproject.toml` (was missing; the backend
-  existed but could never load). Installed in `.qc` (2025.4.1).
+### 9b. Import / export model (`services/model_export_service.py` ditulis ulang)
+- `POST /models/import` (`zip_file` multipart atau `content_b64` JSON; opsional
+  `name`, `target_lifecycle`, `skip_validation`, `force_rename`) menerima zip apa
+  pun dengan **tepat satu** model di kedalaman berapa pun: `.xml`+`.bin`
+  (OpenVINO), `.pt`, `.onnx`, `.tflite`. Nama class datang dari
+  `<stem>.meta.json` / `metadata.json` (`class_names` atau `names`) atau
+  `metadata.yaml` Ultralytics (map `names:`). `__MACOSX/` dan entry titik
+  diabaikan. Export legacy v1 (`weights.pt` + `metadata.json` +
+  `EXPORT_MANIFEST.json`) tetap bisa diimpor, dengan validasi checksum.
+- Tiap import mendarat di folder sendiri `data/models/<nama aman>[_N]/` dan
+  selalu ditulisi `<stem>.meta.json` (`class_names`, `runtime`, `name`,
+  `source_archive`, `imported_at`) — file itu adalah **satu-satunya** tempat
+  backend ONNX/OpenVINO/TFLite membaca nama class. Nama yang hilang → import
+  tetap berhasil dengan warning dan label numerik. Baris registry punya
+  `source="import"`, `runtime` dari ekstensi, `meta_path` ter-set. Kegagalan di
+  mana pun me-rollback folder dan baris registry.
+- Resolusi nama: `name` eksplisit → nama manifest/metadata → folder teratas di
+  zip → nama file archive. Bentrok dapat ` [IMPORTED <ts>]`; foldernya dapat `_N`.
+- `POST /models/<id>/export` men-zip `<name>/<semua file di folder model>` +
+  `<name>/metadata.json` + `EXPORT_MANIFEST.json` (export_version `2.0`); zip
+  hasil export bisa diimpor ulang di PC lain tanpa berubah (test round-trip).
+- `POST /models/upload` (satu file, base64) sekarang juga menulis
+  `<stem>.meta.json` kalau `class_names` dikirim; client membaca `metadata.yaml`
+  / `<stem>.meta.json` yang bersebelahan dengan file yang dipilih dan
+  mengirimkannya.
+- `DELETE /models/<id>?purge_files=1` memanggil
+  `StickerInferenceService.unload_model()` dulu (OpenVINO memory-map `.bin`; di
+  Windows folder tidak bisa dihapus selagi ter-compile) dan melaporkan hanya
+  yang benar-benar terhapus, plus `purge_warning` kalau ada file yang tersisa.
+- Tab Models client: section baru **Import Model Archive (.zip)** (nama opsional
+  → `import_model_archive`, jalan async, menampilkan runtime/folder/classes/
+  warning); **Export** sekarang menanyakan path simpan dan menulis byte-nya
+  (dulu membuangnya begitu saja dan bilang "Export started.").
+- `openvino>=2024.0,<2026.0` ditambahkan ke `pyproject.toml` (dulu hilang;
+  backend-nya ada tapi tidak pernah bisa load). Terinstall di `.qc` (2025.4.1).
 
-### 9c. Tests
-- Deleted: `test_dataset_versioning.py`, `test_training_metrics.py`,
+### 9c. Test
+- Dihapus: `test_dataset_versioning.py`, `test_training_metrics.py`,
   `test_training_worker_data_yaml.py`, `test_training_worker_model_resolution.py`,
-  `test_model_catalog.py`; `test_sticker_detection_gates.py` Phases 4–7
-  (`TrainingWorker`); 16 dataset/augment/training tests in `test_api_smoke.py`
-  (`test_09b` kept as `test_09b_workstation_heartbeat_list_and_delete`); the
-  annotation/augment/`AnnotationCanvas` tests and stub methods in
-  `client_tk/tests/test_ui_smoke.py`.
-- Rewritten: `test_model_export_import.py` (24 tests: OpenVINO zip → folder +
-  `.meta.json` + registry, explicit name, root-level files, `__MACOSX`, missing `.bin`,
-  missing yaml warning, two models / no model / not-a-zip rejected, duplicate name,
-  lifecycle, rollback, `.pt`/`.onnx`/`.tflite`, legacy v1, checksum mismatch, export
-  round-trip, purge). Added `test_sticker_inference.py::UnloadModelTest`.
-- `test_ui_smoke.py::_StubApi` gained the Machine Settings methods
+  `test_model_catalog.py`; Fase 4–7 `test_sticker_detection_gates.py`
+  (`TrainingWorker`); 16 test dataset/augment/training di `test_api_smoke.py`
+  (`test_09b` dipertahankan sebagai
+  `test_09b_workstation_heartbeat_list_and_delete`); test annotation/augment/
+  `AnnotationCanvas` dan stub method di `client_tk/tests/test_ui_smoke.py`.
+- Ditulis ulang: `test_model_export_import.py` (24 test: zip OpenVINO → folder +
+  `.meta.json` + registry, nama eksplisit, file level-root, `__MACOSX`, `.bin`
+  hilang, warning yaml hilang, dua model / tidak ada model / bukan-zip ditolak,
+  nama duplikat, lifecycle, rollback, `.pt`/`.onnx`/`.tflite`, legacy v1,
+  checksum tidak cocok, round-trip export, purge). Ditambahkan
+  `test_sticker_inference.py::UnloadModelTest`.
+- `test_ui_smoke.py::_StubApi` mendapat method Machine Settings
   (`get_machine_settings`, `update_machine_settings`, `get_plc_diagnostics`,
-  `test_plc_coil`, `plc_all_off`) and the setUp patches
-  `machine_settings_tab.messagebox.showerror`. **This was the "hang"**: the tab's load
-  error opened a modal dialog. `test_admin_screen_initializes` now passes in ~3 s.
-  Remaining failures in that file are pre-existing test/code drift (e.g. tests set
-  `preset_line_var`, which no longer exists) — see the run log in SESSION_LOG.
-- Verified end-to-end outside pytest: a real (tiny) OpenVINO IR built with the
-  `openvino` API, zipped Ultralytics-style, imported through `ApiClient` in local
-  mode, loaded by the real OpenVINO backend (`predict` returned `sticker` /
-  `sticker_bad` labels from the written `.meta.json`), exported, deleted with purge
-  (folder gone).
+  `test_plc_coil`, `plc_all_off`) dan patch setUp
+  `machine_settings_tab.messagebox.showerror`. **Inilah "hang"-nya**: error
+  load tab-nya membuka dialog modal. `test_admin_screen_initializes` sekarang
+  lolos dalam ~3 dtk. Kegagalan yang tersisa di file itu adalah drift test/kode
+  pre-existing (mis. test men-set `preset_line_var`, yang sudah tidak ada) —
+  lihat log run di SESSION_LOG.
+- Terverifikasi end-to-end di luar pytest: satu OpenVINO IR nyata (kecil)
+  dibangun dengan API `openvino`, di-zip gaya-Ultralytics, diimpor lewat
+  `ApiClient` dalam mode lokal, dimuat oleh backend OpenVINO asli (`predict`
+  mengembalikan label `sticker` / `sticker_bad` dari `.meta.json` yang
+  ditulis), diekspor, dihapus dengan purge (folder hilang).
 
-### 9d. Bug found on first real use: OpenVINO boxes were off-screen (fixed 2026-09-18)
+### 9d. Bug ditemukan saat pemakaian nyata pertama: box OpenVINO keluar layar (diperbaiki 2026-09-18)
 
-User imported a YOLO11n OpenVINO export, set the template to `expected_class=person`,
-conf 0.05, and saw "raw detection 8400, nothing on screen". Root cause in
-`inference_backend.py::_parse_yolo_output`: it assumed cx,cy,w,h are normalized 0..1
-(true only for Ultralytics **TFLite** exports) and multiplied by imgsz — Ultralytics
-OpenVINO / ONNX exports emit **input pixels** (0..640), so every bbox became e.g.
-`[117412, 254957, 810, 1080]`: nothing drawable, NMS could not merge (38 "persons"),
-position gate always failed. Fix: the parser detects the unit per tensor (max coord
-≤ 1.5 → normalized), is vectorised for the threshold pass, drops degenerate boxes,
-and `raw_detection_count` now means "rows above threshold before NMS" on OpenVINO and
-TFLite too (it used to be the anchor count, 8400, on those two — ONNX/Ultralytics
-already reported candidates). Also fixed while there: the ONNX backend hard-coded NHWC
-640×640 ("TFLite-origin ONNX"); it now reads the session's input shape, so a normal
-Ultralytics ONNX export (NCHW) runs. Not handled: exports made with `nms=True`
-(`[1, 300, 6]` xyxy+conf+cls) — different format, not a raw head.
-Verified on `ultralytics/assets/bus.jpg` with the user's model: 4 persons + bus at
-sane pixel boxes. Tests: `backend/tests/test_inference_backend_parse.py` (10).
+User mengimpor export OpenVINO YOLO11n, men-set template ke
+`expected_class=person`, conf 0.05, dan melihat "raw detection 8400, tidak ada
+apa pun di layar". Akar masalah di
+`inference_backend.py::_parse_yolo_output`: dia mengasumsikan cx,cy,w,h
+ternormalisasi 0..1 (cuma benar untuk export **TFLite** Ultralytics) dan
+mengalikannya dengan imgsz — export OpenVINO / ONNX Ultralytics mengeluarkan
+**piksel input** (0..640), jadi tiap bbox jadi mis. `[117412, 254957, 810,
+1080]`: tidak bisa digambar, NMS tidak bisa menggabungkan (38 "person"), gate
+posisi selalu gagal. Fix: parser mendeteksi satuan per tensor (koordinat
+maksimal ≤ 1.5 → ternormalisasi), divektorisasi untuk pass threshold, membuang
+box degenerate, dan `raw_detection_count` sekarang berarti "baris di atas
+threshold sebelum NMS" di OpenVINO dan TFLite juga (dulu itu jumlah anchor,
+8400, di keduanya — ONNX/Ultralytics sudah melaporkan kandidat). Juga
+diperbaiki sambil di situ: backend ONNX hardcode NHWC 640×640 ("ONNX
+asal-TFLite"); sekarang membaca input shape dari session-nya, jadi export ONNX
+Ultralytics normal (NCHW) bisa jalan. Belum ditangani: export yang dibuat
+dengan `nms=True` (`[1, 300, 6]` xyxy+conf+cls) — format berbeda, bukan head
+mentah.
+Terverifikasi di `ultralytics/assets/bus.jpg` dengan model user: 4 person + bus
+di box piksel yang masuk akal. Test: `backend/tests/test_inference_backend_parse.py` (10).
 
-### 9e. Accept streak could never reach `accept_stable_frames ≥ 2` with a small `accept_stable_ms` (fixed)
+### 9e. Streak accept tidak pernah bisa mencapai `accept_stable_frames ≥ 2` dengan `accept_stable_ms` kecil (diperbaiki)
 
-User set `accept_stable_frames=3`, `accept_stable_ms=100`; bbox stable, nothing ever
-committed. The generation-based accept counter (`inference_accept_count`) reset itself
-whenever more than `accept_stable_ms × 3` had passed since the *first* counted ACCEPT.
-With the template's `inference_fps=4` a new inference result arrives every ~250 ms, so
-three results never fit in a 300 ms window → the count cycled 1, 2, 1, 2 … The window
-was there to stop sparse ACCEPTs across long NOT_FOUND gaps from accumulating, but its
-size was derived from the wrong knob.
+User men-set `accept_stable_frames=3`, `accept_stable_ms=100`; bbox stabil,
+tidak pernah ada yang commit. Counter accept berbasis generasi
+(`inference_accept_count`) mereset dirinya sendiri kapan pun lebih dari
+`accept_stable_ms × 3` sudah lewat sejak ACCEPT yang dihitung *pertama*. Dengan
+`inference_fps=4` di template-nya, hasil inference baru datang tiap ~250 ms,
+jadi tiga hasil tidak pernah muat dalam jendela 300 ms → count-nya berputar 1,
+2, 1, 2 … Jendela itu ada untuk mencegah ACCEPT yang jarang di sela jeda
+NOT_FOUND panjang menumpuk, tapi ukurannya diturunkan dari knob yang salah.
 
-Fix (`InspectionSessionService._update_accept_generation_count`, extracted from the
-inline policy block): count **consecutive** generations. Every frame reads the newest
-generation; a generation read by a frame that was not effective-accept (NOT_FOUND
-outside the holdover, low conf) is never counted, so a gap in counted generation
-numbers means the sticker was lost for longer than `accept_holdover_ms` → streak
-restarts at 1 and the policy stability clock (`policy_stable_frames`,
-`policy_stable_started_at`) restarts with it. No time window; slow inference can no
-longer starve the counter. Semantics of the three knobs are now literal:
-`accept_stable_frames` = N consecutive fresh ACCEPT results, `accept_stable_ms` =
-minimum time since the ACCEPT became stable, `accept_holdover_ms` = tolerated
-detection gap. Hard rejects still reset to 0; non-hard rejects still touch nothing.
-Tests: `backend/tests/test_accept_stability.py` (6).
+Fix (`InspectionSessionService._update_accept_generation_count`, diekstrak dari
+blok policy inline): hitung generasi **berturut-turut**. Tiap frame membaca
+generasi terbaru; generasi yang dibaca oleh frame yang bukan effective-accept
+(NOT_FOUND di luar holdover, conf rendah) tidak pernah dihitung, jadi jeda di
+angka generasi yang dihitung berarti sticker hilang lebih lama dari
+`accept_holdover_ms` → streak restart dari 1 dan jam stabilitas policy
+(`policy_stable_frames`, `policy_stable_started_at`) ikut restart. Tidak ada
+jendela waktu; inference yang lambat tidak bisa lagi membuat counter kelaparan.
+Semantik ketiga knob sekarang literal: `accept_stable_frames` = N hasil ACCEPT
+segar berturut-turut, `accept_stable_ms` = waktu minimum sejak ACCEPT jadi
+stabil, `accept_holdover_ms` = jeda deteksi yang ditoleransi. Hard reject tetap
+reset ke 0; non-hard reject tetap tidak menyentuh apa pun. Test:
+`backend/tests/test_accept_stability.py` (6).
 
-### 9f. INCIDENT: the suite ran against the real `data/` (fixed, data cleaned)
+### 9f. INSIDEN: suite berjalan melawan `data/` yang asli (diperbaiki, data dibersihkan)
 
-`backend.app.core.config` resolves `DATA_ROOT` from `QC_SUITE_DATA_ROOT` at import.
-Only `test_api_smoke.py` (and `test_inspection_persistence.py`) set that env var, at
-their own module top — so whichever test module imported `backend.app.*` first decided
-the data root, and it happened to be `test_api_smoke.py` by alphabetical order. Adding
-`test_accept_stability.py` (sorts before it) made three full runs on 2026-09-18
-07:52–07:54Z read and write the developer's real `data/json_store`: 21 templates, 17
-models, 18 deployments, 13 users, 12 inspection rows and ~64 audit lines were added.
-Cleaned by removing exactly the rows created in those windows (backup of the polluted
-state: `data/json_store.bak-2026-09-18-testpollution/`; the user's own rows —
-template `TEST`, model `OpenVino`, users `admin`/`operator`, inspection row 1,
-`machine_settings.json`, `workstations.json` — were verified unchanged).
+`backend.app.core.config` meresolusi `DATA_ROOT` dari `QC_SUITE_DATA_ROOT` saat
+import. Cuma `test_api_smoke.py` (dan `test_inspection_persistence.py`) yang
+men-set env var itu, di puncak modulnya sendiri — jadi modul test mana pun yang
+pertama mengimpor `backend.app.*` yang menentukan data root, dan kebetulan itu
+`test_api_smoke.py` karena urutan alfabet. Menambahkan
+`test_accept_stability.py` (urutannya sebelum itu) membuat tiga full run pada
+2026-09-18 07:52–07:54Z membaca dan menulis `data/json_store` asli milik
+developer: 21 template, 17 model, 18 deployment, 13 user, 12 baris inspeksi dan
+~64 baris audit ditambahkan. Dibersihkan dengan menghapus persis baris yang
+dibuat di jendela waktu itu (backup dari state yang tercemar:
+`data/json_store.bak-2026-09-18-testpollution/`; baris milik user sendiri —
+template `TEST`, model `OpenVino`, user `admin`/`operator`, baris inspeksi 1,
+`machine_settings.json`, `workstations.json` — terverifikasi tidak berubah).
 
-Fix: `backend/tests/_test_env.py::ensure_test_data_root()` creates the temp root and
-the test `machine_settings.json` (PLC off, inference `classic`); `conftest.py` calls it
-at import, before any test module, and **always overrides** an inherited
-`QC_SUITE_DATA_ROOT`. `test_api_smoke.py` / `test_inspection_persistence.py` call the
-same idempotent helper so they still work under `python -m unittest`. Rule: a test
-must never set `QC_SUITE_DATA_ROOT` itself.
+Fix: `backend/tests/_test_env.py::ensure_test_data_root()` membuat root
+sementara dan `machine_settings.json` test-nya (PLC off, inference `classic`);
+`conftest.py` memanggilnya saat import, sebelum modul test mana pun, dan
+**selalu menimpa** `QC_SUITE_DATA_ROOT` yang terwarisi. `test_api_smoke.py` /
+`test_inspection_persistence.py` memanggil helper idempotent yang sama supaya
+tetap jalan di bawah `python -m unittest`. Aturan: test tidak boleh pernah
+men-set `QC_SUITE_DATA_ROOT` sendiri.

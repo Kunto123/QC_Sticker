@@ -13,11 +13,11 @@ def _utcnow_iso() -> str:
 
 
 class AuthAuditRepository:
-    """Append-only auth audit log backed by a local JSON lines file.
+    """Log audit auth append-only yang disimpan di file JSON lines lokal.
 
-    Each call to :meth:`log` atomically appends one JSON line.
-    :meth:`list_recent` reads the file and returns entries newest-first.
-    Survives backend restart because entries are written to disk.
+    Tiap panggilan ke :meth:`log` menambahkan satu baris JSON secara atomik.
+    :meth:`list_recent` membaca file dan mengembalikan entri terbaru dulu.
+    Bertahan setelah restart backend karena entri ditulis ke disk.
     """
 
     _FILENAME = "auth_audit.jsonl"
@@ -27,7 +27,7 @@ class AuthAuditRepository:
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
-    # Write
+    # Tulis
     # ------------------------------------------------------------------
 
     def log(
@@ -62,13 +62,13 @@ class AuthAuditRepository:
                 f.write(line + "\n")
 
     # ------------------------------------------------------------------
-    # Read
+    # Baca
     # ------------------------------------------------------------------
 
     def list_recent(self, *, limit: int = 200, user_id: int | None = None) -> list[dict]:
-        """Return up to *limit* recent events, newest first.
+        """Balikin sampai *limit* event terbaru, terbaru dulu.
 
-        If *user_id* is given, only events for that user are returned.
+        Kalau *user_id* diberikan, cuma event untuk user itu yang dikembalikan.
         """
         try:
             with self._lock:

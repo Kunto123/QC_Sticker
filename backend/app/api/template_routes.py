@@ -36,11 +36,11 @@ def _encode_ref_preview(save_path: str) -> str | None:
 
 
 def _blank_reference_warning(save_path: str) -> str | None:
-    """Warn at calibration time if the saved edge map has zero variance
-    (no edges detected). cv2.matchTemplate's TM_CCOEFF_NORMED returns a
-    spurious 1.0 "perfect match" against ANY live frame when the reference
-    is constant — this reference would make gap_template_match always report
-    100% ready regardless of what the camera actually sees."""
+    """Beri peringatan saat kalibrasi kalau edge map yang tersimpan variansinya
+    nol (tidak ada tepi terdeteksi). TM_CCOEFF_NORMED milik cv2.matchTemplate
+    mengembalikan "perfect match" 1.0 yang palsu terhadap frame live APAPUN
+    kalau referensinya konstan — referensi seperti ini akan membuat
+    gap_template_match selalu melaporkan 100% siap apapun yang dilihat kamera."""
     edge_map = cv2.imread(save_path, cv2.IMREAD_GRAYSCALE)
     if edge_map is None or edge_map.size == 0:
         return None
@@ -64,7 +64,7 @@ def list_templates():
 def get_template(template_id: int):
     detail = templates_repo.get_template_detail(template_id)
     if detail is None:
-        return jsonify({"error": "Template not found"}), 404
+        return jsonify({"error": "Template tidak ditemukan"}), 404
     return jsonify(detail)
 
 
@@ -73,7 +73,7 @@ def get_template(template_id: int):
 def get_template_version(version_id: int):
     detail = templates_repo.get_version_detail(version_id)
     if detail is None:
-        return jsonify({"error": "Template version not found"}), 404
+        return jsonify({"error": "Template version tidak ditemukan"}), 404
     return jsonify(detail)
 
 
@@ -82,7 +82,7 @@ def get_template_version(version_id: int):
 def get_runtime_template(version_id: int):
     template = templates_repo.get_by_version_id(version_id)
     if template is None:
-        return jsonify({"error": "Template version not found"}), 404
+        return jsonify({"error": "Template version tidak ditemukan"}), 404
     return jsonify(TemplateConfigManager.to_runtime_template(template))
 
 
@@ -127,7 +127,7 @@ def update_template(template_id: int):
 def delete_template(template_id: int):
     ok = templates_repo.delete_template(template_id)
     if not ok:
-        return jsonify({"error": "Template not found"}), 404
+        return jsonify({"error": "Template tidak ditemukan"}), 404
     return jsonify({"deleted": True, "id": template_id})
 
 
@@ -147,7 +147,7 @@ def transition_template_lifecycle(template_id: int):
     payload = request.get_json(force=True) or {}
     new_status = str(payload.get("status") or "").strip().lower()
     if not new_status:
-        return jsonify({"error": "status is required"}), 400
+        return jsonify({"error": "status wajib diisi"}), 400
     change_note = str(payload.get("change_note") or "").strip() or None
     actor = getattr(g, "current_user", None)
     try:
@@ -168,27 +168,27 @@ def transition_template_lifecycle(template_id: int):
 @template_blueprint.post("/<int:template_id>/part-ready-ref/capture")
 @require_roles(UserRole.ADMIN)
 def capture_part_ready_ref(template_id: int):
-    """Capture reference gap patch from a calibration frame."""
+    """Ambil reference gap patch dari frame kalibrasi."""
     payload = request.get_json(force=True) or {}
     frame_b64 = str(payload.get("frame_b64") or "")
     roi = payload.get("roi") or {}
     canny_low = _parse_canny_bound(payload.get("canny_low"))
     canny_high = _parse_canny_bound(payload.get("canny_high"))
     if not frame_b64:
-        return jsonify({"error": "frame_b64 required"}), 400
+        return jsonify({"error": "frame_b64 wajib diisi"}), 400
     try:
         raw = base64.b64decode(frame_b64)
         arr = np.frombuffer(raw, np.uint8)
         frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if frame is None:
-            return jsonify({"error": "Invalid image data"}), 400
+            return jsonify({"error": "Data gambar tidak valid"}), 400
     except Exception as exc:
-        return jsonify({"error": f"Decode failed: {exc}"}), 400
+        return jsonify({"error": f"Decode gagal: {exc}"}), 400
 
     save_path = str(get_ref_path(template_id))
     ok, err_msg = save_ref_patch(frame, roi, save_path, canny_low=canny_low, canny_high=canny_high)
     if ok:
-        # Update template config with ref_path — use update_current_version with full detail
+        # Update config template dengan ref_path — pakai update_current_version dengan detail lengkap
         try:
             detail = templates_repo.get_template_detail(template_id)
             if detail:
@@ -207,26 +207,26 @@ def capture_part_ready_ref(template_id: int):
             "preview_b64": _encode_ref_preview(save_path),
             "warning": _blank_reference_warning(save_path),
         }), 201
-    reason = err_msg or "check ROI and camera"
-    return jsonify({"error": f"Failed to extract gap patch — {reason}"}), 400
+    reason = err_msg or "periksa ROI dan kamera"
+    return jsonify({"error": f"Gagal mengekstrak gap patch — {reason}"}), 400
 
 
 @template_blueprint.post("/<int:template_id>/part-ready-ref/upload")
 @require_roles(UserRole.ADMIN)
 def upload_part_ready_ref(template_id: int):
-    """Upload reference patch image (user provides the patch directly)."""
+    """Upload gambar reference patch (user langsung memberikan patch-nya)."""
     file_bytes = None
     canny_low = _parse_canny_bound(request.args.get("canny_low") or request.form.get("canny_low"))
     canny_high = _parse_canny_bound(request.args.get("canny_high") or request.form.get("canny_high"))
 
-    # Try multipart file upload first
+    # Coba upload file multipart dulu
     if "file" in request.files:
         file = request.files["file"]
         if not file.filename:
-            return jsonify({"error": "Empty filename"}), 400
+            return jsonify({"error": "Nama file kosong"}), 400
         file_bytes = file.read()
     else:
-        # Fallback: accept base64 JSON from local mode client
+        # Fallback: terima JSON base64 dari client mode lokal
         payload = request.get_json(silent=True) or {}
         file_b64 = str(payload.get("file_b64") or "")
         canny_low = canny_low if canny_low is not None else _parse_canny_bound(payload.get("canny_low"))
@@ -235,9 +235,9 @@ def upload_part_ready_ref(template_id: int):
             try:
                 file_bytes = base64.b64decode(file_b64)
             except Exception:
-                return jsonify({"error": "Invalid base64"}), 400
+                return jsonify({"error": "Base64 tidak valid"}), 400
         else:
-            return jsonify({"error": "No file uploaded"}), 400
+            return jsonify({"error": "Tidak ada file yang diupload"}), 400
 
     save_path = str(get_ref_path(template_id))
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -246,15 +246,15 @@ def upload_part_ready_ref(template_id: int):
         arr = np.frombuffer(file_bytes, np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
-            return jsonify({"error": "Invalid image file"}), 400
+            return jsonify({"error": "File gambar tidak valid"}), 400
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         from backend.app.services.gap_detector import _auto_canny
         edge_map = _auto_canny(gray, low=canny_low, high=canny_high)
         cv2.imwrite(save_path, edge_map)
     except Exception as exc:
-        return jsonify({"error": f"Save failed: {exc}"}), 400
+        return jsonify({"error": f"Simpan gagal: {exc}"}), 400
 
-    # Persist gap_ref_path to template JSON
+    # Simpan gap_ref_path ke JSON template
     try:
         detail = templates_repo.get_template_detail(template_id)
         if detail:
@@ -279,7 +279,7 @@ def upload_part_ready_ref(template_id: int):
 @template_blueprint.get("/<int:template_id>/part-ready-ref")
 @require_roles(UserRole.ADMIN)
 def get_part_ready_ref(template_id: int):
-    """Return the currently saved reference edge-map (base64 PNG), if any."""
+    """Balikin reference edge-map yang tersimpan saat ini (base64 PNG), kalau ada."""
     ref_path = get_ref_path(template_id)
     if not ref_path.is_file():
         return jsonify({"exists": False, "preview_b64": None}), 200
@@ -289,12 +289,12 @@ def get_part_ready_ref(template_id: int):
 @template_blueprint.delete("/<int:template_id>/part-ready-ref")
 @require_roles(UserRole.ADMIN)
 def delete_part_ready_ref(template_id: int):
-    """Delete reference patch for a template."""
+    """Hapus reference patch untuk sebuah template."""
     ref_path = get_ref_path(template_id)
     if ref_path.exists():
         ref_path.unlink()
         return jsonify({"deleted": True}), 200
-    return jsonify({"error": "No reference found"}), 404
+    return jsonify({"error": "Reference tidak ditemukan"}), 404
 
 
 @template_blueprint.post("/<int:template_id>/rollback")
@@ -303,7 +303,7 @@ def rollback_template_version(template_id: int):
     payload = request.get_json(force=True) or {}
     version_id = payload.get("version_id")
     if not version_id:
-        return jsonify({"error": "version_id is required"}), 400
+        return jsonify({"error": "version_id wajib diisi"}), 400
     try:
         result = templates_repo.rollback_version(template_id, int(version_id))
     except ValueError as exc:

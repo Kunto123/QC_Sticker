@@ -1,12 +1,12 @@
-"""PLC Flow Strategy pattern.
+"""Pola PLC Flow Strategy.
 
-Each strategy encapsulates:
-  - How to interpret inputs (release, template cycle, clamp feedback)
-  - How to map inspection events → coil actions (accept/reject/part_ready)
-  - What timing to use (pulse duration, debounce, etc.)
+Tiap strategy membungkus:
+  - Cara menafsirkan input (release, template cycle, clamp feedback)
+  - Cara memetakan event inspeksi → aksi coil (accept/reject/part_ready)
+  - Timing apa yang dipakai (durasi pulse, debounce, dll.)
 
-The PlcWorker delegates all mode-specific behavior to the active strategy.
-The strategy reads I/O addresses/timing from MachineSettings, NOT from env vars.
+PlcWorker mendelegasikan semua behavior spesifik-mode ke strategy aktif.
+Strategy membaca alamat I/O/timing dari MachineSettings, BUKAN dari env var.
 """
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 class PlcFlowStrategy(ABC):
-    """Abstract base for PLC flow strategies.
+    """Base abstrak untuk PLC flow strategy.
 
-    Each strategy owns the full lifecycle:
+    Tiap strategy memegang seluruh lifecycle:
       part_ready → clamp → inspection → accept/reject → release
     """
 
@@ -38,36 +38,36 @@ class PlcFlowStrategy(ABC):
         self._settings = settings
         self._num_channels = num_channels
 
-    # ── Subclass must implement ──────────────────────────────────────
+    # ── Subclass wajib implement ──────────────────────────────────────
 
     @abstractmethod
     def on_part_ready(self, worker) -> None:
-        """Engage clamp when part is ready. State → CLAMPING."""
+        """Kunci clamp saat part siap. State → CLAMPING."""
         ...
 
     @abstractmethod
     def on_accept(self, worker) -> None:
-        """Accept: release clamp + pulse OK signal. State → ACCEPT_PULSE."""
+        """Accept: lepas clamp + pulse sinyal OK. State → ACCEPT_PULSE."""
         ...
 
     @abstractmethod
     def on_reject(self, worker) -> None:
-        """Reject: engage reject buzzer + clamp stays. State → REJECT_BUZZER."""
+        """Reject: nyalakan buzzer reject + clamp tetap. State → REJECT_BUZZER."""
         ...
 
     @abstractmethod
     def handle_input_release(self, worker, inputs: list[bool]) -> bool:
-        """Return True if release was triggered (caller should all_off)."""
+        """Return True kalau release ter-trigger (pemanggil harus all_off)."""
         ...
 
     @abstractmethod
     def handle_input_template_cycle(self, worker, inputs: list[bool]) -> bool:
-        """Return True if template cycle was triggered."""
+        """Return True kalau template cycle ter-trigger."""
         ...
 
     @abstractmethod
     def handle_clamp_feedback(self, worker, inputs: list[bool]) -> None:
-        """Transition CLAMPING → CLAMPED when feedback confirms."""
+        """Transisi CLAMPING → CLAMPED saat feedback mengonfirmasi."""
         ...
 
     @abstractmethod
@@ -82,7 +82,7 @@ class PlcFlowStrategy(ABC):
     def get_input_clamp_engaged_address(self) -> int:
         ...
 
-    # ── Shared helpers ───────────────────────────────────────────────
+    # ── Helper bersama ───────────────────────────────────────────────
 
     def all_off(self, worker, reason: str) -> None:
         logger.info("[%s] ALL OFF — %s", self.flow_name, reason)
@@ -106,7 +106,7 @@ class PlcFlowStrategy(ABC):
                 if attempt < max_retries:
                     time.sleep(0.1 * attempt)
         raise RuntimeError(
-            f"write_coil addr={addr} failed after {max_retries} attempts"
+            f"write_coil addr={addr} gagal setelah {max_retries} percobaan"
         )
 
     @property

@@ -1,11 +1,11 @@
-"""Machine Settings tab — the UI for data/json_store/machine_settings.json.
+"""Tab Machine Settings — UI untuk data/json_store/machine_settings.json.
 
-Sections (mirror backend/app/models/machine_settings.py):
-  - connection  PLC transport (restart required)
-  - io          relay / input addresses + PLC timing (applied live)
-  - timing      inspection timers / commit policy (applied live)
-  - inference   sticker model runtime (restart required)
-  - Diagnostics (live status, test coil, all-off)
+Section (mirror backend/app/models/machine_settings.py):
+  - connection  transport PLC (perlu restart)
+  - io          alamat relay / input + timing PLC (diterapkan live)
+  - timing      timer inspeksi / commit policy (diterapkan live)
+  - inference   runtime model sticker (perlu restart)
+  - Diagnostics (status live, test coil, all-off)
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from client_tk.app.theme import (
 
 
 class MachineSettingsTab:
-    """Machine / PLC Settings tab in Admin screen."""
+    """Tab Machine / PLC Settings di Admin screen."""
 
     def __init__(self, admin, tab_frame):
         self.admin = admin
@@ -44,7 +44,7 @@ class MachineSettingsTab:
         self._build()
         self._load_settings()
 
-    # ── Build ─────────────────────────────────────────────────────────
+    # ── Bangun ─────────────────────────────────────────────────────────
 
     def _build(self) -> None:
         self.frame.columnconfigure(0, weight=1)
@@ -52,25 +52,25 @@ class MachineSettingsTab:
 
         body = self.admin._make_scrollable_body(self.frame, "MachineSettings")
 
-        # ── Identity section ──
+        # ── Section Identity ──
         self._build_identity_section(body, 0)
 
-        # ── Connection section ──
+        # ── Section Connection ──
         self._build_connection_section(body, 1)
 
-        # ── I/O Addresses section (unified — not split by mode) ──
+        # ── Section I/O Addresses (unified — tidak dipisah per mode) ──
         self._build_io_section(body, 2)
 
-        # ── Timer / Inspection Policy section ──
+        # ── Section Timer / Inspection Policy ──
         self._build_timing_section(body, 3)
 
-        # ── Inference section ──
+        # ── Section Inference ──
         self._build_inference_section(body, 4)
 
-        # ── Diagnostics section ──
+        # ── Section Diagnostics ──
         self._build_diagnostics_section(body, 5)
 
-        # ── Action buttons ──
+        # ── Tombol aksi ──
         self._build_actions(body, 6)
 
     def _section_frame(self, parent, row: int, title: str) -> ctk.CTkFrame:
@@ -99,14 +99,14 @@ class MachineSettingsTab:
         cb.grid(row=row, column=0, columnspan=2, sticky="w", padx=12, pady=2)
         return var
 
-    # ── Identity section ─────────────────────────────────────────────
+    # ── Section Identity ─────────────────────────────────────────────
 
     def _build_identity_section(self, parent, row: int) -> None:
         sec = self._section_frame(parent, row, "Identity")
         r = 1
         self._add_field(sec, r, "Line", "identity.line", ""); r += 1
 
-    # ── Connection section ───────────────────────────────────────────
+    # ── Section Connection ───────────────────────────────────────────
 
     def _build_connection_section(self, parent, row: int) -> None:
         sec = self._section_frame(parent, row, "Connection / Transport  (perlu restart backend)")
@@ -124,7 +124,7 @@ class MachineSettingsTab:
         self._add_field(sec, r, "Timeout (ms)", "connection.timeout_ms", "1000"); r += 1
         self._add_field(sec, r, "Modbus Unit ID", "connection.modbus_unit_id", "255"); r += 1
 
-    # ── Unified I/O Addresses section ─────────────────────────────────
+    # ── Section I/O Addresses (unified) ─────────────────────────────────
 
     def _build_io_section(self, parent, row: int) -> None:
         sec = self._section_frame(parent, row, "I/O Addresses")
@@ -152,7 +152,7 @@ class MachineSettingsTab:
         self._add_field(sec, r, "Min Reclamp Interval (ms)", "io.min_reclamp_interval_ms", "3000"); r += 1
         self._add_field(sec, r, "Release Debounce (ms)", "io.release_input_debounce_ms", "200"); r += 1
 
-    # ── Timer / Inspection Policy section ──────────────────────────────
+    # ── Section Timer / Inspection Policy ──────────────────────────────
 
     def _build_timing_section(self, parent, row: int) -> None:
         sec = self._section_frame(parent, row, "Timer / Inspection Policy")
@@ -195,7 +195,7 @@ class MachineSettingsTab:
         self._add_field(sec, r, "Session Idle Timeout (s)", "timing.session_idle_timeout_s", "300"); r += 1
         self._add_field(sec, r, "Max Consecutive Rejects", "timing.max_consecutive_rejects", "0"); r += 1
 
-    # ── Inference section ─────────────────────────────────────────────
+    # ── Section Inference ─────────────────────────────────────────────
 
     def _build_inference_section(self, parent, row: int) -> None:
         sec = self._section_frame(parent, row, "Inference / Model  (perlu restart backend)")
@@ -212,14 +212,14 @@ class MachineSettingsTab:
             font=("Segoe UI", 8), text_color=TEXT_SECONDARY,
         ).grid(row=r, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 8)); r += 1
 
-    # ── Diagnostics section ──────────────────────────────────────────
+    # ── Section Diagnostics ──────────────────────────────────────────
 
     def _build_diagnostics_section(self, parent, row: int) -> None:
         sec = self._section_frame(parent, row, "Diagnostics / Commissioning")
         r = 1
 
-        # Live status display
-        self._diag_status_var = tk.StringVar(value="Not connected")
+        # Tampilan status live
+        self._diag_status_var = tk.StringVar(value="Belum terhubung")
         ctk.CTkLabel(sec, text="PLC Status:", font=("Segoe UI", 9, "bold"), text_color=TEXT_PRIMARY).grid(
             row=r, column=0, sticky="w", padx=12, pady=2,
         )
@@ -227,8 +227,8 @@ class MachineSettingsTab:
             row=r, column=1, sticky="w", padx=(0, 12), pady=2,
         ); r += 1
 
-        # Input snapshot display
-        self._diag_inputs_var = tk.StringVar(value="No data")
+        # Tampilan snapshot input
+        self._diag_inputs_var = tk.StringVar(value="Tidak ada data")
         ctk.CTkLabel(sec, text="Input Snapshot:", font=("Segoe UI", 9, "bold"), text_color=TEXT_PRIMARY).grid(
             row=r, column=0, sticky="w", padx=12, pady=2,
         )
@@ -236,7 +236,7 @@ class MachineSettingsTab:
             row=r, column=1, sticky="w", padx=(0, 12), pady=2,
         ); r += 1
 
-        # Test coil
+        # Test Coil
         ctk.CTkLabel(sec, text="Test Coil Address:", font=("Segoe UI", 9, "bold"), text_color=TEXT_PRIMARY).grid(
             row=r, column=0, sticky="w", padx=12, pady=2,
         )
@@ -253,7 +253,7 @@ class MachineSettingsTab:
             row=r, column=1, sticky="w", padx=(0, 12), pady=2,
         ); r += 1
 
-        # Diag buttons
+        # Tombol diagnostik
         btn_frame = ctk.CTkFrame(sec, fg_color="transparent")
         btn_frame.grid(row=r, column=0, columnspan=2, sticky="w", padx=12, pady=(4, 10))
 

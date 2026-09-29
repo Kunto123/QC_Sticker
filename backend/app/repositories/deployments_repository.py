@@ -117,7 +117,7 @@ class DeploymentsRepository(JsonRepository):
         raise ValueError(f"Deployment {deployment_id} not found.")
 
     def rollback(self, deployment_id: int, *, rolled_back_by: int | None = None) -> dict:
-        """Deactivate deployment_id and re-deploy the previous version."""
+        """Nonaktifkan deployment_id dan deploy ulang versi sebelumnya."""
         payload = self.load()
         items = payload["deployments"]
         now = datetime.now(UTC).isoformat()
@@ -126,7 +126,7 @@ class DeploymentsRepository(JsonRepository):
         if target is None:
             raise ValueError(f"Deployment {deployment_id} not found.")
 
-        # Find the most recent *other* deployment
+        # Cari deployment *lain* yang paling baru
         previous = next(
             (
                 d for d in reversed(items)
@@ -140,7 +140,7 @@ class DeploymentsRepository(JsonRepository):
         target["is_active"] = False
         target["effective_until"] = now
 
-        # Create a new deployment record based on the previous one
+        # Buat record deployment baru berdasarkan yang sebelumnya
         record = {
             "id": self.next_id(items),
             "template_id": previous["template_id"],

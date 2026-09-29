@@ -123,7 +123,7 @@ class UsersRepository(JsonRepository):
     def create_user(self, username: str, password: str, role: str, mc_id: str = "") -> dict[str, Any]:
         users = self.load()
         if self.get_by_username(username):
-            raise ValueError("Username already exists.")
+            raise ValueError("Username sudah ada.")
         role_enum = UserRole(role)
         now = datetime.now(UTC).isoformat()
         record = {
@@ -168,7 +168,7 @@ class UsersRepository(JsonRepository):
         users = self.load()
         normalized_hash = str(rfid_uid_hash or "").strip()
         if not normalized_hash:
-            raise ValueError("RFID UID is required.")
+            raise ValueError("UID RFID wajib diisi.")
         for item in users:
             if int(item["id"]) != int(user_id) and str(item.get("rfid_uid_hash") or "") == normalized_hash:
                 raise ValueError("RFID card is already bound to another user.")

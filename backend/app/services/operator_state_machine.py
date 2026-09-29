@@ -21,11 +21,11 @@ class OperatorStateDecision:
 
 
 class OperatorInspectionStateMachine:
-    """Per-session state policy for production inspection.
+    """Kebijakan state per-session untuk inspeksi produksi.
 
-    Simple mode: no cache, no hysteresis.
-    - Part ready + settled → always run inference
-    - Part leave → reset to IDLE
+    Mode simpel: tanpa cache, tanpa hysteresis.
+    - Part ready + settled → selalu jalankan inference
+    - Part keluar → reset ke IDLE
     """
 
     def update(
@@ -36,7 +36,7 @@ class OperatorInspectionStateMachine:
         present: bool,
         settled: bool,
     ) -> OperatorStateDecision:
-        # ── Part leave or not present → reset to IDLE ──
+        # ── Part keluar atau tidak ada → reset ke IDLE ──
         if not part_ready or not present:
             session_state.operator_state = OperatorRuntimeState.IDLE.value
             session_state.inspection_result_cache = None
@@ -52,7 +52,7 @@ class OperatorInspectionStateMachine:
                 reset_event=True,
             )
 
-        # ── Settled → always run inference (no cache) ──
+        # ── Settled → selalu jalankan inference (tanpa cache) ──
         if settled:
             session_state.settle_frame_count = int(getattr(session_state, "settle_frame_count", 0)) + 1
             session_state.last_inference_ms = int(time.time() * 1000)
@@ -65,7 +65,7 @@ class OperatorInspectionStateMachine:
                 reset_event=False,
             )
 
-        # ── Not settled → stay IDLE ──
+        # ── Belum settled → tetap IDLE ──
         session_state.settle_frame_count = 0
         session_state.operator_state = OperatorRuntimeState.IDLE.value
         return OperatorStateDecision(

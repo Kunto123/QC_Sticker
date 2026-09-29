@@ -7,7 +7,7 @@ from backend.app.repositories.base_json import JsonRepository
 
 
 class WorkstationRegistryRepository(JsonRepository):
-    """Keeps a lightweight registry of known workstations based on heartbeat pings."""
+    """Menyimpan registry ringan workstation yang dikenal berdasarkan ping heartbeat."""
 
     def __init__(self) -> None:
         super().__init__("workstations.json", {"workstations": []})
@@ -77,7 +77,7 @@ class WorkstationRegistryRepository(JsonRepository):
         return dict(record)
 
     def get_stale(self, *, stale_after_seconds: int = 120) -> list[dict[str, Any]]:
-        """Return workstations not seen within stale_after_seconds."""
+        """Balikin workstation yang tidak terlihat dalam stale_after_seconds."""
         now = datetime.now(UTC)
         result = []
         for w in self.list_workstations():

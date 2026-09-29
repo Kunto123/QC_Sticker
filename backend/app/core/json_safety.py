@@ -1,4 +1,4 @@
-"""JSON safety helper — convert NumPy types to native Python before jsonify."""
+"""Helper keamanan JSON — konversi tipe NumPy ke Python native sebelum jsonify."""
 from __future__ import annotations
 
 from typing import Any
@@ -7,9 +7,9 @@ import numpy as np
 
 
 def to_jsonable(value: Any) -> Any:
-    """Recursively convert NumPy scalars/arrays to native Python types.
+    """Konversi rekursif skalar/array NumPy ke tipe Python native.
 
-    Safe for: dict, list, tuple, set, np.floating, np.integer, np.bool_,
+    Aman untuk: dict, list, tuple, set, np.floating, np.integer, np.bool_,
     np.ndarray, None, str, int, float, bool.
     """
     if isinstance(value, dict):
@@ -24,10 +24,10 @@ def to_jsonable(value: Any) -> Any:
         return bool(value)
     if isinstance(value, np.ndarray):
         return to_jsonable(value.tolist())
-    # Native Python types: pass through
+    # Tipe Python native: teruskan apa adanya
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    # Fallback: try to convert to native
+    # Fallback: coba konversi ke native
     try:
         return float(value) if hasattr(value, "__float__") else str(value)
     except Exception:
@@ -35,6 +35,6 @@ def to_jsonable(value: Any) -> Any:
 
 
 def safe_jsonify(response: Any) -> Any:
-    """Convert response to JSON-safe and call Flask jsonify."""
+    """Konversi response ke bentuk JSON-safe lalu panggil Flask jsonify."""
     from flask import jsonify
     return jsonify(to_jsonable(response))

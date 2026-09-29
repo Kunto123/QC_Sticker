@@ -1,7 +1,7 @@
-"""StickerFlow — PLC flow strategy for QC Sticker inspection mode.
+"""StickerFlow — PLC flow strategy untuk mode inspeksi QC Sticker.
 
-This is the extracted behavior from the original PlcWorker, now reading
-all addresses/timing from MachineSettings.sticker instead of constructor args.
+Ini adalah behavior yang diekstrak dari PlcWorker aslinya, sekarang membaca
+semua alamat/timing dari MachineSettings.sticker, bukan dari argumen constructor.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class StickerFlow(PlcFlowStrategy):
-    """QC Sticker mode: part_ready → clamp → inspect → accept/reject → release."""
+    """Mode QC Sticker: part_ready → clamp → inspect → accept/reject → release."""
 
     def __init__(
         self,
@@ -35,7 +35,7 @@ class StickerFlow(PlcFlowStrategy):
     def flow_name(self) -> str:
         return "sticker-flow"
 
-    # ── Address accessors ────────────────────────────────────────────
+    # ── Accessor alamat ────────────────────────────────────────────
 
     def get_input_release_address(self) -> int:
         return self._sticker_settings.input_release_address
@@ -46,10 +46,10 @@ class StickerFlow(PlcFlowStrategy):
     def get_input_clamp_engaged_address(self) -> int:
         return self._sticker_settings.input_clamp_engaged_address
 
-    # ── Event handlers ──────────────────────────────────────────────
+    # ── Event handler ──────────────────────────────────────────────
 
     def on_part_ready(self, worker) -> None:
-        """Engage clamp (CH3=ON), turn off OK light + enji buzzer."""
+        """Kunci clamp (CH3=ON), matikan lampu OK + buzzer enji."""
         s = self._sticker_settings
         self.write_coil(worker, s.relay_clamp_address, True)
         self.write_coil(worker, s.relay_ok_light_buzzer_address, False)
@@ -60,7 +60,7 @@ class StickerFlow(PlcFlowStrategy):
         )
 
     def on_accept(self, worker) -> None:
-        """ACCEPT: release clamp, pulse OK light+buzzer, → IDLE."""
+        """ACCEPT: lepas clamp, pulse lampu OK+buzzer, → IDLE."""
         s = self._sticker_settings
         self.write_coil(worker, s.relay_clamp_address, False)
         self.write_coil(worker, s.relay_ok_light_buzzer_address, True)
@@ -71,7 +71,7 @@ class StickerFlow(PlcFlowStrategy):
         )
 
     def on_reject(self, worker) -> None:
-        """REJECT: enji buzzer ON, clamp stays, wait for manual release."""
+        """REJECT: buzzer enji ON, clamp tetap, tunggu manual release."""
         s = self._sticker_settings
         self.write_coil(worker, s.relay_enji_buzzer_address, True)
         self.write_coil(worker, s.relay_clamp_address, True)
@@ -81,7 +81,7 @@ class StickerFlow(PlcFlowStrategy):
         )
 
     def finish_accept_pulse(self, worker) -> None:
-        """Called by worker when accept pulse timer expires."""
+        """Dipanggil worker saat timer accept pulse habis."""
         s = self._sticker_settings
         self.write_coil(worker, s.relay_ok_light_buzzer_address, False)
         self._accept_pulse_end = None
@@ -93,10 +93,10 @@ class StickerFlow(PlcFlowStrategy):
             and time.time() >= self._accept_pulse_end
         )
 
-    # ── Input handlers ──────────────────────────────────────────────
+    # ── Input handler ──────────────────────────────────────────────
 
     def handle_input_release(self, worker, inputs: list[bool]) -> bool:
-        """Manual release on IN1. Returns True if triggered."""
+        """Manual release di IN1. Returns True kalau ter-trigger."""
         addr = self._sticker_settings.input_release_address
         if addr < len(inputs) and inputs[addr]:
             logger.info("[sticker-flow] INPUT release (addr=%d) — Manual Release", addr)
@@ -104,7 +104,7 @@ class StickerFlow(PlcFlowStrategy):
         return False
 
     def handle_input_template_cycle(self, worker, inputs: list[bool]) -> bool:
-        """Template cycle on IN2. Returns True if triggered."""
+        """Template cycle di IN2. Returns True kalau ter-trigger."""
         addr = self._sticker_settings.input_template_address
         if addr < len(inputs) and inputs[addr]:
             logger.info("[sticker-flow] INPUT template cycle (addr=%d)", addr)
@@ -112,7 +112,7 @@ class StickerFlow(PlcFlowStrategy):
         return False
 
     def handle_clamp_feedback(self, worker, inputs: list[bool]) -> None:
-        """Transition CLAMPING → CLAMPED when feedback confirms."""
+        """Transisi CLAMPING → CLAMPED saat feedback mengonfirmasi."""
         if not self._sticker_settings.clamp_feedback_enabled:
             return
         addr = self._sticker_settings.input_clamp_engaged_address

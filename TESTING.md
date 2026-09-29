@@ -1,121 +1,128 @@
-# Testing Guide
+# Panduan Testing
 
-## How to run
+## Cara menjalankan
 
-From the repo root:
+Dari repo root:
 
 ```sh
-scripts/run_tests.sh            # whole backend suite
-scripts/run_tests.sh -k contract   # forward extra args to pytest
+scripts/run_tests.sh            # seluruh suite backend
+scripts/run_tests.sh -k contract   # teruskan argumen tambahan ke pytest
 ```
 
-or directly:
+atau langsung:
 
 ```sh
 python -m pytest backend/tests -q
-python -m pytest backend/tests/test_evaluators.py -q          # one file
-python -m pytest backend/tests/test_evaluators.py -q -k Counter   # one class/pattern
+python -m pytest backend/tests/test_evaluators.py -q          # satu file
+python -m pytest backend/tests/test_evaluators.py -q -k Counter   # satu class/pattern
 ```
 
-The root `conftest.py` and `pyproject.toml [tool.pytest.ini_options]` make the
-suite runnable from the repo root: they fix `sys.path`, export
-`QC_SUITE_DEFAULT_STICKER_MODEL_PATH` from an in-repo `.pt` (consumed only by
-`test_api_smoke.py`, which copies it into the test machine's
-`machine_settings.json`), and register custom markers. Runtime settings for tests
-come from a `machine_settings.json` in the test data root, never from env vars.
+`conftest.py` di root dan `pyproject.toml [tool.pytest.ini_options]` membuat
+suite bisa dijalankan dari repo root: keduanya membetulkan `sys.path`, mengekspor
+`QC_SUITE_DEFAULT_STICKER_MODEL_PATH` dari `.pt` di dalam repo (cuma dipakai
+`test_api_smoke.py`, yang menyalinnya ke `machine_settings.json` mesin test), dan
+mendaftarkan marker custom. Setting runtime untuk test datang dari
+`machine_settings.json` di test data root, tidak pernah dari env var.
 
-### Expected state
+### Kondisi yang diharapkan
 
-As of 2026-09-18 (after Data/Training removal, HANDOFF.md §9):
+Per 2026-09-18 (setelah penghapusan Data/Training, HANDOFF.md §9):
 **176 passed, 2 failed, 7 skipped** (`pytest backend/tests`); client
 `test_async_bridge.py test_frame_upload.py test_app_restart.py`: 9 passed;
-`test_ui_smoke.py`: 12 passed / 8 failed (pre-existing drift, see `.claude/CLAUDE.md`).
-The two failures are pre-existing and documented in `.claude/CLAUDE.md`
-(`test_00b` needs a `.pt` for the registry seed; `test_04d` is test/code drift on
-`part_ready_ema_ratio`). The skips need the real trained sticker model (outside
-the repo); see `HANDOFF.md` section 2b to un-skip them locally.
+`test_ui_smoke.py`: 12 passed / 8 failed (drift yang sudah ada sebelumnya, lihat
+`.claude/CLAUDE.md`). Dua kegagalan itu memang sudah ada sebelumnya dan
+didokumentasikan di `.claude/CLAUDE.md` (`test_00b` butuh `.pt` untuk seed
+registry; `test_04d` adalah drift test/code pada `part_ready_ema_ratio`). Skip-nya
+butuh model sticker terlatih yang asli (di luar repo); lihat `HANDOFF.md` section
+2b untuk un-skip secara lokal.
 
-(History: five clusters of RED tests from a multi-round refactor were adjudicated by
-the orchestrator as intentional redesigns and resolved — PLC adapter/worker rewrite,
-deployment global-binding, `/plc/status` operator access, OCR removal. See
-`HANDOFF.md` section 3 "RESOLVED" and section 6 "FASE 1 dead-code cleanup".)
+(Sejarah: lima klaster test RED dari refactor multi-ronde sudah diputuskan
+orchestrator sebagai redesign yang disengaja dan sudah diselesaikan — rewrite
+adapter/worker PLC, global-binding deployment, akses operator `/plc/status`,
+penghapusan OCR. Lihat `HANDOFF.md` section 3 "RESOLVED" dan section 6 "FASE 1
+dead-code cleanup".)
 
-If you later change what the code *does*, do not silence a failing test by editing it
-to pass — either restore the behavior (test goes green) or delete/rewrite the obsolete
-test **and** update `HANDOFF.md`.
+Kalau nanti kamu mengubah apa yang *dilakukan* kode, jangan bungkam test yang
+gagal dengan mengedit test-nya supaya lolos — pilih salah satu: kembalikan
+behavior-nya (test jadi hijau) atau hapus/tulis ulang test yang sudah usang
+**dan** update `HANDOFF.md`.
 
-### Data root isolation (read before adding a test file)
+### Isolasi data root (baca sebelum menambah file test)
 
-`conftest.py` → `backend/tests/_test_env.py::ensure_test_data_root()` gives the whole
-run a throwaway `QC_SUITE_DATA_ROOT` with a test `machine_settings.json` **before any
-test module is imported**, and overrides any inherited value. Never set
-`QC_SUITE_DATA_ROOT` in a test module: `config.py` fixes `DATA_ROOT` at first import,
-so the first importer wins — on 2026-09-18 a new file that sorted before
-`test_api_smoke.py` ran three suites against the developer's real `data/`
-(HANDOFF.md §9f). Modules that must also run under `python -m unittest` call the
-same helper (idempotent).
+`conftest.py` → `backend/tests/_test_env.py::ensure_test_data_root()` memberi
+seluruh run `QC_SUITE_DATA_ROOT` yang sekali pakai dengan `machine_settings.json`
+test **sebelum modul test mana pun di-import**, dan menimpa nilai yang diwarisi
+apa pun. Jangan pernah set `QC_SUITE_DATA_ROOT` di dalam modul test: `config.py`
+mengunci `DATA_ROOT` di import pertama, jadi importer pertama yang menang — pada
+2026-09-18 sebuah file baru yang urutan namanya sebelum `test_api_smoke.py` sempat
+menjalankan tiga suite melawan `data/` asli milik developer (HANDOFF.md §9f).
+Modul yang juga harus jalan lewat `python -m unittest` memanggil helper yang sama
+(idempotent).
 
-### Retired: datasets / annotation / augment / training (by design, 2026-09-18)
+### Dihapus: datasets / annotation / augment / training (disengaja, 2026-09-18)
 
-Training happens in other software. The dataset, annotation, augment and training
-repositories, workers, routes, Admin tabs and their tests are gone (HANDOFF.md §9).
-Do not re-add them. Model *import* is what remains and is covered by
-`backend/tests/test_model_export_import.py` (OpenVINO zip → `data/models/<name>/` +
-`.meta.json`, legacy export, round-trip, purge).
+Training dilakukan di software lain. Repository, worker, route, tab Admin dataset,
+annotation, augment, dan training beserta test-nya sudah hilang (HANDOFF.md §9).
+Jangan ditambahkan lagi. Model *import* adalah yang tersisa dan dicakup
+`backend/tests/test_model_export_import.py` (zip OpenVINO → `data/models/<name>/` +
+`.meta.json`, export legacy, round-trip, purge).
 
-### Retired: OCR sticker validation (by design)
+### Dihapus: validasi sticker OCR (disengaja)
 
-OCR-based sticker validation was **removed on purpose**. Sticker mode now validates
-**presence / position / tilt**, NOT code/content. The OCR-specific tests were retired:
-`OcrAnchorPrimaryGateTest`, the OCR cases of `StickerOnlyOcrGateTest` (in
-`test_sticker_detection_gates.py`), and the `_augment_with_*_ocr` payload tests (in
-`test_sticker_inference.py`). Non-OCR tests (tilt gates, geometry/position, OCR
-text-normalization helpers that still exist) were preserved. Do NOT re-add tests that
-depend on the removed `StickerRule`/`VisionConfig` OCR fields (`use_ocr`,
-`ocr_expected_code`, `ocr_mode`, `ocr_engine`, `expected_dot_x/y`, `max_anchor_offset`).
-The last OCR helper code and its tests were deleted on 2026-09-18 (HANDOFF.md §7).
+Validasi sticker berbasis OCR **dihapus dengan sengaja**. Mode sticker sekarang
+memvalidasi **presence / position / tilt**, BUKAN kode/konten. Test khusus OCR
+sudah dihapus: `OcrAnchorPrimaryGateTest`, kasus OCR dari `StickerOnlyOcrGateTest`
+(di `test_sticker_detection_gates.py`), dan test payload `_augment_with_*_ocr` (di
+`test_sticker_inference.py`). Test non-OCR (tilt gate, geometry/position, helper
+normalisasi teks OCR yang masih ada) dipertahankan. JANGAN tambahkan lagi test yang
+bergantung pada field OCR `StickerRule`/`VisionConfig` yang sudah dihapus
+(`use_ocr`, `ocr_expected_code`, `ocr_mode`, `ocr_engine`, `expected_dot_x/y`,
+`max_anchor_offset`). Kode helper OCR terakhir dan test-nya dihapus pada
+2026-09-18 (HANDOFF.md §7).
 
-## The rule
+## Aturannya
 
-**Any behavior change ships with its test in the same commit.**
+**Perubahan behavior apa pun harus dikirim bersama test-nya dalam commit yang sama.**
 
-If you change what the code *does* (a new field, a dropped param, a different
-decision, a new endpoint, a renamed contract key), the commit that changes it must
-also add or update the test that proves the new behavior. A PR that changes behavior
-without a test is incomplete. This is exactly the failure mode FASE 0 cleaned up:
-five refactor rounds drifted the code away from its tests, leaving ~49 silent
-failures and zero coverage on the evaluator package.
+Kalau kamu mengubah apa yang *dilakukan* kode (field baru, param yang dihapus,
+keputusan yang berbeda, endpoint baru, key contract yang diganti nama), commit
+yang mengubahnya juga harus menambah atau memperbarui test yang membuktikan
+behavior baru itu. PR yang mengubah behavior tanpa test dianggap belum lengkap.
+Ini persis failure mode yang dibereskan FASE 0: lima ronde refactor membuat kode
+melenceng dari test-nya, menyisakan ~49 kegagalan diam-diam dan nol coverage di
+package evaluator.
 
-## How to add a test
+## Cara menambah test
 
-Tests use the stdlib `unittest` style (the suite is `unittest`-based; pytest runs
-it). Match the existing idioms:
+Test memakai gaya stdlib `unittest` (suite-nya berbasis `unittest`; pytest yang
+menjalankannya). Ikuti idiom yang sudah ada:
 
-1. Put it in `backend/tests/test_<area>.py`. One `unittest.TestCase` subclass per
-   logical unit; name methods `test_*`. Use `self.subTest(...)` for table-driven cases.
-2. **Prefer unit tests over integration.** Import the unit directly:
+1. Taruh di `backend/tests/test_<area>.py`. Satu subclass `unittest.TestCase` per
+   unit logis; nama method `test_*`. Pakai `self.subTest(...)` untuk kasus table-driven.
+2. **Utamakan unit test dibanding integration.** Import unit-nya langsung:
    - Contracts: `from shared.contracts.templates import template_from_dict, ...`
    - Evaluators: `from backend.app.services.evaluators.counter import CounterEvaluator`
-     Build a minimal `EvalContext` (see `test_evaluators.py::_ctx`) and a minimal
-     `SessionState` (see `_make_state`).
-3. **Stub external dependencies**, don't hit real hardware/models/DB:
+     Bangun `EvalContext` minimal (lihat `test_evaluators.py::_ctx`) dan
+     `SessionState` minimal (lihat `_make_state`).
+3. **Stub dependency eksternal**, jangan sentuh hardware/model/DB asli:
    - Anomaly scorer: `mock.patch("backend.app.services.evaluators.defect.get_scorer",
      return_value=_StubScorer(...))`.
-   - PLC client: patch `backend.app.services.plc_adapter.ModbusTcpClient` with a
-     `MagicMock` (pattern in `test_plc_modbus_adapter.py::_make_mock_client`).
-   - HTTP/API: use `create_app().test_client()` (pattern in `test_api_smoke.py`).
-4. **Assert JSON safety** for anything that becomes a `Decision.details` / API
-   payload: `json.dumps(payload, allow_nan=False)` must not raise. `Infinity`/`NaN`
-   silently break the WebSocket/HTTP layer.
-5. If a test genuinely needs real infra (a trained model, PLC hardware, a live DB),
-   mark it `@unittest.skip("reason ... see HANDOFF.md")` or with the
-   `requires_real_sticker_model` / `requires_plc_hardware` marker — never leave it
-   as a silent failure.
+   - Client PLC: patch `backend.app.services.plc_adapter.ModbusTcpClient` dengan
+     `MagicMock` (pola di `test_plc_modbus_adapter.py::_make_mock_client`).
+   - HTTP/API: pakai `create_app().test_client()` (pola di `test_api_smoke.py`).
+4. **Pastikan JSON safety** untuk apa pun yang jadi `Decision.details` / payload
+   API: `json.dumps(payload, allow_nan=False)` tidak boleh error. `Infinity`/`NaN`
+   diam-diam merusak layer WebSocket/HTTP.
+5. Kalau satu test memang butuh infra asli (model terlatih, hardware PLC, DB
+   live), tandai dengan `@unittest.skip("alasan ... lihat HANDOFF.md")` atau marker
+   `requires_real_sticker_model` / `requires_plc_hardware` — jangan pernah
+   dibiarkan jadi kegagalan diam-diam.
 
-## Golden fixtures
+## Golden fixture
 
-`backend/tests/fixtures/golden_template_{sticker,counter,defect}.json` are frozen
-template contracts. `test_golden_templates.py` asserts they parse, validate, and
-dispatch to a `Decision`. Treat them as append-only: if a template field changes
-shape, update the fixture **and** explain why in the commit — later phases depend on
-these staying stable.
+`backend/tests/fixtures/golden_template_{sticker,counter,defect}.json` adalah
+template contract yang dibekukan. `test_golden_templates.py` memastikan mereka
+ter-parse, tervalidasi, dan bisa dispatch ke `Decision`. Perlakukan sebagai
+append-only: kalau bentuk field template berubah, update fixture-nya **dan**
+jelaskan alasannya di commit — fase-fase berikutnya bergantung pada fixture ini
+tetap stabil.

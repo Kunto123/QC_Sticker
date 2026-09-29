@@ -1,17 +1,17 @@
-"""Model package import / export.
+"""Import / export paket model.
 
-Import accepts any zip that contains exactly one detector model, at any depth:
+Import menerima zip apa pun yang berisi tepat satu model detector, di kedalaman berapa pun:
 
-* an Ultralytics OpenVINO export folder (`<name>_openvino_model/` with `<name>.xml`,
-  `<name>.bin` and `metadata.yaml`) — the common case for this project;
-* a single `.pt`, `.onnx` or `.tflite`, optionally with a `metadata.yaml`,
-  `metadata.json` or `*.meta.json` next to it;
-* a package produced by `create_export()` of this app (any version).
+* folder export Ultralytics OpenVINO (`<name>_openvino_model/` dengan `<name>.xml`,
+  `<name>.bin` dan `metadata.yaml`) — kasus umum untuk project ini;
+* satu `.pt`, `.onnx` atau `.tflite`, opsional dengan `metadata.yaml`,
+  `metadata.json` atau `*.meta.json` di sebelahnya;
+* paket hasil `create_export()` app ini (versi berapa pun).
 
-Every imported model lands in its own folder `data/models/<name>/` together with a
-`<stem>.meta.json` carrying `class_names`, which is exactly where the inference
-backends look for class names (`<model dir>/<model stem>.meta.json`). The registry
-entry (`models.json`) points at the model file and the meta file.
+Tiap model yang diimpor mendarat di folder sendiri `data/models/<name>/` bersama
+`<stem>.meta.json` yang membawa `class_names`, persis di situ inference backend
+mencari nama kelas (`<model dir>/<model stem>.meta.json`). Entry registry
+(`models.json`) menunjuk ke file model dan file meta-nya.
 """
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def runtime_for_path(path: str | Path) -> str:
 
 
 def class_names_from_yaml(raw: bytes | str) -> list[str]:
-    """`names:` from an Ultralytics `metadata.yaml` — a {index: name} map or a list."""
+    """`names:` dari `metadata.yaml` Ultralytics — map {index: name} atau list."""
     import yaml
 
     try:
@@ -102,7 +102,7 @@ def class_names_from_json(raw: bytes | str) -> list[str]:
 
 
 def write_meta_json(model_path: Path, class_names: list[str], **extra: Any) -> Path:
-    """Write `<model dir>/<model stem>.meta.json` — the file the inference backends read."""
+    """Tulis `<model dir>/<model stem>.meta.json` — file yang dibaca inference backend."""
     meta_path = model_path.parent / f"{model_path.stem}.meta.json"
     payload = {"class_names": list(class_names), **extra}
     meta_path.write_bytes(_json_dumps(payload))
@@ -110,8 +110,8 @@ def write_meta_json(model_path: Path, class_names: list[str], **extra: Any) -> P
 
 
 def purge_model_files(model: dict[str, Any]) -> list[str]:
-    """Delete a model's files from disk (only inside MODELS_DIR). A model that lives in
-    its own sub-folder (everything imported by this service) has the folder removed."""
+    """Hapus file model dari disk (hanya di dalam MODELS_DIR). Model yang hidup di
+    sub-folder sendiri (semua yang diimpor lewat servis ini) foldernya ikut dihapus."""
     removed: list[str] = []
     root = MODELS_DIR.resolve()
     path_value = str(model.get("path") or "").strip()
@@ -128,8 +128,8 @@ def purge_model_files(model: dict[str, Any]) -> list[str]:
         return removed
     folder = model_path.parent
     if folder != root and root in folder.parents:
-        # Only report what is really gone: on Windows a model that is still loaded
-        # (OpenVINO mmaps the .bin) cannot be deleted; the caller must unload first.
+        # Cuma laporkan yang benar-benar hilang: di Windows model yang masih
+        # dimuat (OpenVINO mmap .bin) tidak bisa dihapus; caller harus unload dulu.
         shutil.rmtree(folder, ignore_errors=True)
         if not folder.exists():
             removed.append(str(folder))
@@ -171,9 +171,9 @@ class ModelExportService:
     # ── Export ──────────────────────────────────────────────────────────
 
     def _model_files(self, model: dict[str, Any]) -> list[Path]:
-        """All files that make up the model: the weights, the `.bin` twin of an
-        OpenVINO `.xml`, the paired meta json and (folder models) everything else in
-        the folder such as `metadata.yaml`."""
+        """Semua file yang menyusun model: weights, kembaran `.bin` milik
+        `.xml` OpenVINO, meta json pasangannya, dan (model berbasis folder)
+        semua isi folder lainnya seperti `metadata.yaml`."""
         model_path = Path(str(model.get("path") or "").strip())
         if not model_path.exists() or not model_path.is_file():
             raise ValueError(f"Model file not found: {model_path}")
@@ -256,7 +256,7 @@ class ModelExportService:
 
     @staticmethod
     def _inspect_archive(zf: ZipFile) -> dict[str, Any]:
-        """Find the one model inside the archive plus its companions."""
+        """Cari satu model di dalam archive beserta file pendampingnya."""
         members = [
             info for info in zf.infolist()
             if not info.is_dir()
@@ -267,7 +267,7 @@ class ModelExportService:
             ext = PurePosixPath(info.filename).suffix.lower()
             if ext in MODEL_EXTENSIONS:
                 by_ext.setdefault(ext, []).append(info)
-        # legacy app export: weights.pt is the model even if other .pt files exist
+        # export app lama: weights.pt adalah modelnya walau ada file .pt lain
         legacy = [i for i in members if PurePosixPath(i.filename).name == "weights.pt"]
         if legacy and any(PurePosixPath(i.filename).name == "EXPORT_MANIFEST.json" for i in members):
             candidates = legacy
@@ -275,11 +275,11 @@ class ModelExportService:
             candidates = [i for ext in (".xml", ".pt", ".onnx", ".tflite") for i in by_ext.get(ext, [])]
         if not candidates:
             raise ValueError(
-                "Archive contains no model file (expected one of: .xml + .bin (OpenVINO), .pt, .onnx, .tflite)."
+                "Archive tidak berisi file model (harus salah satu dari: .xml + .bin (OpenVINO), .pt, .onnx, .tflite)."
             )
         if len(candidates) > 1:
             names = ", ".join(PurePosixPath(i.filename).name for i in candidates)
-            raise ValueError(f"Archive contains more than one model file ({names}); pack one model per zip.")
+            raise ValueError(f"Archive berisi lebih dari satu file model ({names}); kemas satu model per zip.")
         model_info = candidates[0]
         model_dir = PurePosixPath(model_info.filename).parent
         model_stem = PurePosixPath(model_info.filename).stem
@@ -288,7 +288,7 @@ class ModelExportService:
         siblings = {PurePosixPath(i.filename).name: i for i in members if PurePosixPath(i.filename).parent == model_dir}
         bin_info = siblings.get(f"{model_stem}.bin") if runtime == "openvino" else None
         if runtime == "openvino" and bin_info is None:
-            raise ValueError(f"OpenVINO model '{model_stem}.xml' has no matching '{model_stem}.bin' in the archive.")
+            raise ValueError(f"Model OpenVINO '{model_stem}.xml' tidak punya pasangan '{model_stem}.bin' di archive.")
 
         root_files = {PurePosixPath(i.filename).name: i for i in members if PurePosixPath(i.filename).parent == PurePosixPath(".")}
         meta_json = (
@@ -335,7 +335,7 @@ class ModelExportService:
         try:
             zf = ZipFile(archive_path, "r")
         except BadZipFile as exc:
-            raise ValueError("File is not a valid zip archive.") from exc
+            raise ValueError("File bukan zip archive yang valid.") from exc
 
         warnings: list[str] = []
         with zf:
@@ -349,16 +349,16 @@ class ModelExportService:
                 try:
                     manifest = json.loads(zf.read(found["manifest"]).decode("utf-8-sig"))
                 except Exception:  # noqa: BLE001
-                    warnings.append("EXPORT_MANIFEST.json could not be parsed; ignored.")
+                    warnings.append("EXPORT_MANIFEST.json tidak bisa di-parse; diabaikan.")
             extras = [(PurePosixPath(i.filename).name, zf.read(i)) for i in found["extras"]]
 
-        # checksums from our own manifest (v1 or v2), when present
+        # checksum dari manifest kita sendiri (v1 atau v2), kalau ada
         if manifest and not skip_validation:
             files_info = dict(manifest.get("files") or {})
             model_member = PurePosixPath(found["model"].filename).name
             expected = str((files_info.get(model_member) or {}).get("checksum_sha256") or "")
             if expected and expected != _sha256_bytes(model_bytes):
-                raise ValueError(f"Archive checksum mismatch for {model_member}")
+                raise ValueError(f"Checksum archive tidak cocok untuk {model_member}")
 
         meta_doc: dict[str, Any] = {}
         if meta_json_bytes is not None:
@@ -374,8 +374,8 @@ class ModelExportService:
         runtime = found["runtime"]
         if runtime != "ultralytics" and not class_names:
             warnings.append(
-                "No class names found (metadata.yaml / *.meta.json). Detections will carry numeric "
-                "labels until a <model>.meta.json with class_names is added."
+                "Tidak ketemu class names (metadata.yaml / *.meta.json). Deteksi akan pakai "
+                "label numerik sampai <model>.meta.json dengan class_names ditambahkan."
             )
 
         display_name = (

@@ -1,15 +1,15 @@
 """
-PLC Worker — strategy-based, reads config from MachineSettings DB.
+PLC Worker — berbasis strategy, baca config dari MachineSettings DB.
 
 Flow:
-  IDLE → CLAMPING → ACCEPT (clamp OFF, OK pulse → IDLE)
-                   → REJECT (enji buzzer ON, clamp stays → wait release → IDLE)
-  Any state → Input release → IDLE (all off)
-  Any state → Input template → cycle template
+  IDLE → CLAMPING → ACCEPT (clamp OFF, pulse OK → IDLE)
+                   → REJECT (buzzer enji ON, clamp tetap → tunggu release → IDLE)
+  State apa pun → Input release → IDLE (all off)
+  State apa pun → Input template → ganti template
 
-Coil writes go through StickerFlow (services/sticker_flow.py); the input poll
-loop, status() and clamp_engaged() read this worker's mirror fields. Both are
-(re)configured from MachineSettings.io by apply_machine_settings().
+Penulisan coil lewat StickerFlow (services/sticker_flow.py); loop poll input,
+status() dan clamp_engaged() membaca field mirror worker ini. Keduanya
+di-(re)konfigurasi dari MachineSettings.io oleh apply_machine_settings().
 """
 from __future__ import annotations
 
@@ -42,8 +42,8 @@ class PlcWorker:
         self._adapter = adapter
         self._num_channels = num_channels
 
-        # I/O map + PLC timing. Defaults match PlcIoConfig; apply_machine_settings()
-        # overwrites them and builds the flow strategy.
+        # Peta I/O + timing PLC. Default mengikuti PlcIoConfig; apply_machine_settings()
+        # menimpanya dan membangun flow strategy.
         self._accept_pulse_ms = 1000
         self._input_release_address = 0
         self._input_template_address = 1
@@ -54,18 +54,18 @@ class PlcWorker:
         self._relay_enji_buzzer = 1
         self._strategy: StickerFlow = StickerFlow(adapter, PlcIoConfig(), num_channels)
 
-        # ── Cycle Lock State ──
+        # ── State Cycle Lock ──
         self._cycle_locked: bool = False
         self._cycle_lock_reason: str = ""
         self._last_clamp_off_at: float = 0.0
         self._last_part_ready_event_id: str | None = None
 
-        # Guards (from MachineSettings.io) / dry-run (from MachineSettings.connection)
+        # Guard (dari MachineSettings.io) / dry-run (dari MachineSettings.connection)
         self._min_reclamp_interval_ms: int = 3000
         self._release_input_debounce_ms: int = 500
         self._dry_run: bool = bool(dry_run)
 
-        # Release input edge tracking
+        # Tracking edge input release
         self._release_input_started_at: float | None = None
         self._release_input_triggered: bool = False
 
@@ -75,35 +75,35 @@ class PlcWorker:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
-        # Command queue
+        # Antrean command
         self._cmd_queue: list[dict] = []
         self._cmd_event = threading.Event()
 
-        # Input debounce
+        # Debounce input
         self._last_input_press: dict[int, float] = {}
         self._input_debounce_s: float = 0.5
         self._template_cycle_event_id: int = 0
         self._last_template_cycle_at: float | None = None
         self._last_input_snapshot: list[bool] = []
 
-        # Item 1: current decision event_id for actuation callback
+        # Item 1: event_id keputusan saat ini untuk callback aktuasi
         self._current_decision_event_id: str | None = None
 
-        # Health tracking for commit interlock (Item 1)
+        # Tracking kesehatan untuk commit interlock (Item 1)
         self._last_poll_ok_at: float = 0.0
         self._last_write_ok_at: float = 0.0
 
-        # Reconnect backoff — prevents tight reconnect loop when device is dead
+        # Backoff reconnect — mencegah reconnect loop rapat saat device mati
         self._reconnect_failures: int = 0
         self._reconnect_backoff_until: float = 0.0
-        self._max_reconnect_backoff_s: float = 30.0  # cap at 30s
+        self._max_reconnect_backoff_s: float = 30.0  # dibatasi 30dtk
 
-        # Callbacks
+        # Callback
         self._template_cycle_callback = None
         self._on_state_change_callback = None
-        self._on_actuation_result_callback = None  # Item 1: actuation ACK/NACK
+        self._on_actuation_result_callback = None  # Item 1: ACK/NACK aktuasi
 
-    # ── Public API (unchanged signatures) ───────────────────────────
+    # ── API publik (signature tidak berubah) ───────────────────────────
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -113,8 +113,8 @@ class PlcWorker:
             self._adapter.connect()
             self._adapter.all_off(self._num_channels)
         except Exception as exc:
-            # Don't abort: start the worker anyway so it self-heals once the port
-            # is available (poll loop reconnects + writes lazy-connect on demand).
+            # Jangan batalkan: tetap start worker-nya supaya self-heal begitu port
+            # tersedia (loop poll reconnect + write lazy-connect sesuai kebutuhan).
             logger.warning(
                 "[plc-worker] initial connect failed (%s) — starting anyway, will retry", exc
             )
@@ -152,18 +152,18 @@ class PlcWorker:
         self._on_state_change_callback = callback
 
     def set_on_actuation_result_callback(self, callback) -> None:
-        """Item 1: set callback for actuation ACK/NACK.
+        """Item 1: set callback untuk ACK/NACK aktuasi.
 
-        Callback signature: cb(event_id: str, decision: str, ok: bool, reason: str = "")
-        Called after _on_accept/_on_reject completes (ok=True) or fails (ok=False).
+        Signature callback: cb(event_id: str, decision: str, ok: bool, reason: str = "")
+        Dipanggil setelah _on_accept/_on_reject selesai (ok=True) atau gagal (ok=False).
         """
         self._on_actuation_result_callback = callback
 
     def apply_machine_settings(self, settings) -> None:
-        """Apply MachineSettings.io: rebuild the flow strategy AND sync the mirror
-        fields read by the poll loop / status(). Safe to call while running.
-        `dry_run` is deliberately NOT touched here — it comes from
-        MachineSettings.connection at boot and needs a restart to change.
+        """Terapkan MachineSettings.io: bangun ulang flow strategy DAN sinkronkan
+        field mirror yang dibaca loop poll / status(). Aman dipanggil saat berjalan.
+        `dry_run` sengaja TIDAK disentuh di sini — itu datang dari
+        MachineSettings.connection saat boot dan butuh restart untuk berubah.
         """
         io = settings.io
         self._accept_pulse_ms = max(100, int(io.accept_pulse_ms))
@@ -216,22 +216,22 @@ class PlcWorker:
             }
 
     def is_healthy(self, max_stale_ms: int = 5000) -> bool:
-        """Return True if PLC has been polled successfully within max_stale_ms.
+        """Return True kalau PLC sudah berhasil di-poll dalam max_stale_ms.
 
-        Used by inspection_session as a commit interlock: if the PLC link is
-        stale/disconnected, commits are blocked to prevent persisting results
-        while no relay can fire.
+        Dipakai inspection_session sebagai commit interlock: kalau link PLC
+        basi/terputus, commit diblokir untuk mencegah persist hasil selagi
+        tidak ada relay yang bisa menyala.
         """
         import time
         if self._thread is None or not self._thread.is_alive():
             return False
         if self._dry_run:
-            return True  # dry-run doesn't need live PLC
+            return True  # dry-run tidak butuh PLC live
         if not self._adapter.is_connected():
             return False
         last_ok = self._last_poll_ok_at
         if last_ok <= 0:
-            return False  # never successfully polled
+            return False  # belum pernah berhasil di-poll
         age_ms = (time.monotonic() - last_ok) * 1000.0
         return age_ms <= float(max_stale_ms)
 
@@ -246,13 +246,13 @@ class PlcWorker:
             return False
         return self._state in {"CLAMPING", "CLAMPED", "REJECT_BUZZER"}
 
-    # ── Backward-compatible coil access for diagnostics ──────────────
+    # ── Akses coil untuk diagnostik (backward-compatible) ──────────────
 
     @property
     def num_channels(self) -> int:
         return self._num_channels
 
-    # ── Command Queue ────────────────────────────────────────────────
+    # ── Antrean Command ────────────────────────────────────────────────
 
     def _enqueue_cmd(self, cmd: dict) -> None:
         with self._lock:
@@ -268,7 +268,7 @@ class PlcWorker:
                 return self._cmd_queue.pop(0)
         return None
 
-    # ── State setter with callback ───────────────────────────────────
+    # ── State setter dengan callback ───────────────────────────────────
 
     def _set_state(self, new_state: str) -> None:
         with self._lock:
@@ -286,13 +286,13 @@ class PlcWorker:
         for attempt in range(1, max_retries + 1):
             try:
                 self._adapter.write_coil(addr, value)
-                self._last_write_ok_at = time.monotonic()  # Item 1: track successful write
+                self._last_write_ok_at = time.monotonic()  # Item 1: catat write yang berhasil
                 return
             except Exception as exc:
                 logger.error("[plc-worker] write_coil addr=%d attempt %d failed: %s", addr, attempt, exc)
                 if attempt < max_retries:
                     time.sleep(0.1 * attempt)
-        raise RuntimeError(f"write_coil addr={addr} failed after {max_retries} attempts")
+        raise RuntimeError(f"write_coil addr={addr} gagal setelah {max_retries} percobaan")
 
     def _all_off(self, reason: str) -> None:
         logger.info("[plc-worker] ALL OFF — %s", reason)
@@ -305,7 +305,7 @@ class PlcWorker:
         self._last_clamp_off_at = time.time()
         self._set_state("IDLE")
 
-    # ── ACCEPT / REJECT (delegated to strategy when available) ───────
+    # ── ACCEPT / REJECT (didelegasikan ke strategy kalau tersedia) ───────
 
     def _on_accept(self) -> None:
         _event_id = self._current_decision_event_id
@@ -313,7 +313,7 @@ class PlcWorker:
         try:
             self._strategy.on_accept(self)
             self._set_state("ACCEPT_PULSE")
-            # Item 1: actuation ACK
+            # Item 1: ACK aktuasi
             self._fire_actuation_result(_event_id, _decision, True)
         except Exception as exc:
             logger.error("[plc-worker] ACCEPT actuation failed: %s", exc)
@@ -326,7 +326,7 @@ class PlcWorker:
         try:
             self._strategy.on_reject(self)
             self._set_state("REJECT_BUZZER")
-            # Item 1: actuation ACK
+            # Item 1: ACK aktuasi
             self._fire_actuation_result(_event_id, _decision, True)
         except Exception as exc:
             logger.error("[plc-worker] REJECT actuation failed: %s", exc)
@@ -339,7 +339,7 @@ class PlcWorker:
         self._set_state("IDLE")
         logger.info("[plc-worker] ACCEPT done → IDLE")
 
-    # ── Command handlers ─────────────────────────────────────────────
+    # ── Handler command ─────────────────────────────────────────────
 
     def _handle_cmd(self, cmd: dict) -> None:
         cmd_type = cmd.get("type")
@@ -388,14 +388,14 @@ class PlcWorker:
         event_id = cmd.get("event_id")
         with self._lock:
             if self._state not in {"CLAMPING", "CLAMPED"}:
-                # Item 1: don't silently drop — log and fire NACK callback
+                # Item 1: jangan drop diam-diam — log dan tembak callback NACK
                 logger.warning(
                     "[plc-worker] decision '%s' dropped — state=%s (not CLAMPING/CLAMPED)",
                     decision, self._state,
                 )
                 self._fire_actuation_result(event_id, decision or "?", False, f"wrong_state:{self._state}")
                 return
-        # Store event_id for the actuation callback
+        # Simpan event_id untuk callback aktuasi
         self._current_decision_event_id = event_id
         if decision == "ACCEPT":
             self._on_accept()
@@ -405,47 +405,47 @@ class PlcWorker:
     def _cmd_force_release(self, cmd: dict) -> None:
         self._all_off(cmd.get("reason", "manual"))
 
-    # ── Item 1: FAULT state + actuation callback ─────────────────────
+    # ── Item 1: state FAULT + callback aktuasi ─────────────────────
 
     def _enter_plc_fault(self, reason: str) -> None:
-        """Transition to FAULT state: lock cycle, drive fault output."""
+        """Transisi ke state FAULT: kunci cycle, nyalakan output fault."""
         with self._lock:
             self._cycle_locked = True
             self._cycle_lock_reason = f"plc_fault:{reason}"
         self._set_state("FAULT")
-        # Drive fault output (enji buzzer relay) if reachable
+        # Nyalakan output fault (relay buzzer enji) kalau bisa dijangkau
         try:
             self._write_coil(self._relay_enji_buzzer, True)
         except Exception:
-            pass  # best-effort; already in fault
+            pass  # best-effort; sudah dalam fault
         logger.error("[plc-worker] FAULT state entered: %s", reason)
 
     def _fire_actuation_result(self, event_id: str | None, decision: str, ok: bool, reason: str = "") -> None:
-        """Item 1: notify caller of actuation result (ACK/NACK)."""
+        """Item 1: beritahu pemanggil hasil aktuasi (ACK/NACK)."""
         if self._on_actuation_result_callback is not None:
             try:
                 self._on_actuation_result_callback(event_id, decision, ok, reason)
             except Exception as exc:
                 logger.error("[plc-worker] actuation result callback error: %s", exc)
 
-    # ── Main loop ────────────────────────────────────────────────────
+    # ── Loop utama ────────────────────────────────────────────────────
 
     def _loop(self) -> None:
         while not self._stop_event.is_set():
             try:
-                # Process all pending commands first
+                # Proses semua command pending dulu
                 while True:
                     cmd = self._dequeue_cmd()
                     if cmd is None:
                         break
                     self._handle_cmd(cmd)
 
-                # Check accept pulse timeout
-                # Strategy-level accept pulse
+                # Cek timeout accept pulse
+                # Accept pulse level-strategy
                 if self._strategy.is_accept_pulse_complete() and self._state == "ACCEPT_PULSE":
                     self._finish_accept_pulse()
 
-                # Poll inputs
+                # Poll input
                 self._poll_inputs()
             except Exception as exc:
                 logger.error("[plc-worker] _loop unhandled exception: %s", exc, exc_info=True)
@@ -453,16 +453,16 @@ class PlcWorker:
             self._cmd_event.clear()
 
     def _poll_inputs(self) -> None:
-        # Reconnect backoff: skip polling if we're in backoff window
+        # Backoff reconnect: lewati polling kalau masih dalam jendela backoff
         if self._reconnect_backoff_until > time.time():
             return
         try:
             inputs = self._adapter.read_inputs(address=0, count=_INPUT_READ_COUNT)
         except Exception as exc:
             self._reconnect_failures += 1
-            # Exponential backoff: 2^failures seconds, capped at _max_reconnect_backoff_s
+            # Exponential backoff: 2^kegagalan detik, dibatasi _max_reconnect_backoff_s
             _delay = min(self._max_reconnect_backoff_s, 2 ** self._reconnect_failures)
-            # Minimum 2s floor to avoid rapid retries on sustained failures
+            # Batas bawah minimum 2dtk supaya tidak retry cepat saat kegagalan terus-menerus
             _delay = max(2.0, _delay)
             self._reconnect_backoff_until = time.time() + _delay
             logger.warning(
@@ -471,8 +471,8 @@ class PlcWorker:
                 self._reconnect_failures, exc, _delay,
             )
             try:
-                # Force full disconnect first so the adapter actually reopens
-                # the serial port (connect() early-returns if _connected=True).
+                # Paksa disconnect penuh dulu supaya adapter benar-benar membuka
+                # ulang serial port (connect() early-return kalau _connected=True).
                 self._adapter.disconnect()
             except Exception as disconnect_exc:
                 logger.warning("[plc-worker] disconnect before reconnect failed: %s", disconnect_exc)
@@ -482,7 +482,7 @@ class PlcWorker:
             except Exception as reconnect_exc:
                 logger.error("[plc-worker] reconnect failed: %s", reconnect_exc)
             return
-        # Successful poll — reset backoff counter
+        # Poll berhasil — reset counter backoff
         self._reconnect_failures = 0
         self._reconnect_backoff_until = 0.0
         if not inputs or len(inputs) < 2:
@@ -491,10 +491,10 @@ class PlcWorker:
         now = time.time()
         with self._lock:
             self._last_input_snapshot = list(inputs[:_INPUT_READ_COUNT])
-        # Track successful poll for commit interlock health check
+        # Catat poll berhasil untuk cek kesehatan commit interlock
         self._last_poll_ok_at = time.monotonic()
 
-        # Input release (IN1) — edge triggered + stable debounce
+        # Input release (IN1) — edge-triggered + debounce stabil
         _release_addr = self._input_release_address
         if _release_addr < len(inputs):
             _release_active = bool(inputs[_release_addr])
@@ -518,7 +518,7 @@ class PlcWorker:
                 self._release_input_started_at = None
                 self._release_input_triggered = False
 
-        # Input template cycle (IN2) — edge triggered + debounce
+        # Input template cycle (IN2) — edge-triggered + debounce
         if self._input_template_address < len(inputs) and inputs[self._input_template_address]:
             last = self._last_input_press.get(self._input_template_address, 0.0)
             if now - last > self._input_debounce_s:

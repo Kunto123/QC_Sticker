@@ -135,7 +135,7 @@ class ResultPanel(ctk.CTkFrame):
         self.live_reason_var.configure(text=str(live_reason))
 
         self.live_template_version_var.configure(text=str(live_session.get("template_version_id") or "-"))
-        # Inference gate display
+        # Tampilan inference gate
         _gate = live_inference_gate
         if _gate:
             _can_infer = _gate.get("can_infer", False)
@@ -145,11 +145,11 @@ class ResultPanel(ctk.CTkFrame):
         else:
             _gate_text = "-"
         self.live_inference_gate_var.configure(text=_gate_text)
-        # Part latch display
+        # Tampilan part latch
         _latch_status = live_part_ready.get("latch_status") or "inactive"
         _effective_pr = live_part_ready.get("effective_part_ready", False)
         self.live_latch_var.configure(text=f"{_latch_status} | effective={'READY' if _effective_pr else 'BLOCK'}")
-        # Inspection policy display
+        # Tampilan inspection policy
         _policy = payload.get("inspection_policy") or {}
         if _policy:
             _action = _policy.get("action", "-")
@@ -162,7 +162,7 @@ class ResultPanel(ctk.CTkFrame):
                 _policy_text = f"WAITING: {_pending_r}"
         else:
             _policy_text = "-"
-        # Add policy display to live_state_var (append)
+        # Tambahkan tampilan policy ke live_state_var (append)
         self.live_state_var.configure(text=f"{str(payload.get('event_state') or '-').upper()} | {_policy_text}")
 
         part_ready_status = display_part_ready.get("status") or ("ready" if display_part_ready.get("part_ready") else "not_ready")

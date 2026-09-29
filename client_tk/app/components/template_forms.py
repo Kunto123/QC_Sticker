@@ -31,14 +31,14 @@ class LabeledValuePanel(ctk.CTkFrame):
             value.grid(row=row, column=col + 1, sticky="ew", pady=3)
             self._labels[key] = value
 
-        # Dynamically recompute wraplength when panel is resized
+        # Hitung ulang wraplength secara dinamis saat panel di-resize
         self.bind("<Configure>", self._on_resize, add="+")
 
     def _on_resize(self, event) -> None:
-        total = event.width - 20  # rough inner padding
+        total = event.width - 20  # perkiraan padding dalam
         if total < 80:
             return
-        # Estimate: label columns are ~85 px each; remaining split across value cols
+        # Estimasi: kolom label ~85 px masing-masing; sisanya dibagi ke kolom nilai
         per_value = max(80, (total - 85 * self._n_columns) // self._n_columns - 8)
         for widget in self._labels.values():
             widget.configure(wraplength=per_value)

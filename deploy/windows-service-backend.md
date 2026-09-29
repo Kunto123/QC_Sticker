@@ -1,4 +1,4 @@
-# Windows Service Backend
+# Backend sebagai Windows Service
 
 Jalankan backend sebagai service Windows dengan wrapper seperti NSSM atau WinSW.
 

@@ -29,14 +29,14 @@ from backend.app.workers.plc_worker import PlcWorker
 
 _logger = logging.getLogger("backend.container")
 
-# ── Config: env (secrets/bootstrap) + machine_settings.json (everything else) ──
+# ── Config: env (secret/bootstrap) + machine_settings.json (sisanya) ──
 app_config = AppConfig()
 machine_settings_repo = MachineSettingsRepository()
 machine_settings = machine_settings_repo.load_settings()
 app_config.apply_machine_settings(machine_settings)
-# The connection section that was actually used to build the PLC adapter. A later
-# PUT that changes `connection` cannot be applied live — the route compares
-# against this and reports `restart_required`.
+# Bagian connection yang benar-benar dipakai untuk membangun PLC adapter. PUT
+# berikutnya yang mengubah `connection` tidak bisa diterapkan langsung — route
+# membandingkan dengan ini dan melaporkan `restart_required`.
 boot_connection = machine_settings.connection
 
 device_runtime = DeviceRuntimeResolver(app_config)
@@ -78,7 +78,7 @@ template_runtime_service = TemplateRuntimeService(templates_repo, deployments_re
 sticker_inference_service = StickerInferenceService(app_config, models_repo, device_runtime)
 model_export_service = ModelExportService(models_repo, templates_repo, deployments_repo)
 
-# ── PLC: adapter + worker entirely from machine_settings.connection / .io ──
+# ── PLC: adapter + worker seluruhnya dari machine_settings.connection / .io ──
 plc_worker: PlcWorker | None = None
 if boot_connection.enabled:
     plc_worker = PlcWorker(
@@ -99,7 +99,7 @@ inspection_session_service = InspectionSessionService(
 workstation_registry_repo = WorkstationRegistryRepository()
 
 def _log_startup_config() -> None:
-    """Log the effective config (env + machine_settings.json) in one block."""
+    """Log konfigurasi efektif (env + machine_settings.json) dalam satu blok."""
     _cfg = app_config
     _ms = machine_settings
     _lines = [
@@ -112,7 +112,7 @@ def _log_startup_config() -> None:
         "--- machine_settings.json ---",
         f"inference.mode: {_cfg.sticker_inference_mode}",
         f"inference.device: {_cfg.device_mode} (cuda_device_id={_cfg.cuda_device_id})",
-        f"inference.default_model_path: {_cfg.default_sticker_model_path or '(empty — template vision.model_path is used)'}",
+        f"inference.default_model_path: {_cfg.default_sticker_model_path or '(kosong — pakai vision.model_path dari template)'}",
         f"inference.num_threads: {_cfg.inference_num_threads}",
         f"inference.timeout_s: {_cfg.inference_timeout_s}",
         f"timing.commit_grace_ms: {_cfg.commit_grace_ms}",

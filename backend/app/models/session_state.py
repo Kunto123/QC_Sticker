@@ -41,12 +41,12 @@ class SessionState:
     part_ready_ratio_history: list[float] = field(default_factory=list)
     part_ready_ema_ratio: float = -1.0
     last_overlay_b64: str | None = None
-    # Settle-time debounce: timestamp of the first frame where part_ready was True
-    # in the current ready-run.  Reset to None whenever part_ready becomes False or
-    # presence is lost.
+    # Debounce settle-time: timestamp frame pertama saat part_ready True
+    # di ready-run saat ini. Direset ke None begitu part_ready jadi False atau
+    # presence hilang.
     part_ready_settle_started_at: datetime | None = None
-    # PLC constant-output mode: True once enqueue_part_ready() has been called for
-    # the current ready-run, preventing duplicate triggers.  Reset when part leaves.
+    # Mode constant-output PLC: True begitu enqueue_part_ready() sudah dipanggil
+    # untuk ready-run saat ini, mencegah trigger duplikat. Direset saat part pergi.
     plc_part_ready_triggered: bool = False
     plc_clamp_requested_at: float = 0.0
     plc_clamp_ready_at: float = 0.0
@@ -57,75 +57,76 @@ class SessionState:
     operator_state: str = "IDLE"
     inspection_has_run_for_current_part: bool = False
     inspection_result_cache: dict[str, Any] | None = None
-    # Async inference state
+    # State inference async
     inference_result_cache: dict[str, Any] | None = None
     inference_result_ts: float = 0.0
     inference_frame_counter: int = 0
     inference_thread_busy: bool = False
-    inference_submit_at: float = 0.0  # monotonic timestamp when last inference was submitted
-    _inference_executor: concurrent.futures.ThreadPoolExecutor | None = None  # lazy-init per session
-    # Inference generation counter — incremented each time a new inference result
-    # is committed to the cache. Used by the accept gate to count distinct
-    # inference runs (not just repeated reads of the same cached result).
+    inference_submit_at: float = 0.0  # timestamp monotonic saat inference terakhir disubmit
+    _inference_executor: concurrent.futures.ThreadPoolExecutor | None = None  # lazy-init per sesi
+    # Counter generasi inference — bertambah tiap kali hasil inference baru
+    # di-commit ke cache. Dipakai gate accept untuk menghitung run inference
+    # yang benar-benar berbeda (bukan cuma baca ulang hasil cache yang sama).
     inference_result_generation: int = 0
     inference_accept_count: int = 0
     inference_accept_first_ts: float = 0.0
     inference_last_counted_generation: int = -1
-    # Inference cache TTL (ms) — configurable per session from app config.
+    # TTL cache inference (ms) — configurable per sesi dari app config.
     inference_cache_ttl_ms: int = 10000
-    gap_ref_cache: dict[str, Any] = field(default_factory=dict)  # cache for loaded gap reference patches
+    gap_ref_cache: dict[str, Any] = field(default_factory=dict)  # cache untuk gap reference patch yang sudah dimuat
     part_removed_seen_at: datetime | None = None
-    # Hysteresis counter: number of consecutive settled frames.
-    # Reset to 0 when part_ready/presence is lost.
+    # Counter hysteresis: jumlah frame settled berturut-turut.
+    # Direset ke 0 kalau part_ready/presence hilang.
     settle_frame_count: int = 0
-    # Timestamp when part first became settled (consecutive_part_ready_frames >= threshold).
-    # Used for reject timeout: if no accept-commit within reject_timeout_ms, reject as COMMIT_TIMEOUT.
-    # Reset to None when PLC returns to IDLE or when part leaves.
+    # Timestamp saat part pertama kali settled (consecutive_part_ready_frames >= threshold).
+    # Dipakai untuk reject timeout: kalau tidak ada accept-commit dalam reject_timeout_ms, reject sebagai COMMIT_TIMEOUT.
+    # Direset ke None saat PLC kembali IDLE atau part pergi.
     part_ready_settled_at: datetime | None = None
-    # Inference cooldown: timestamp (ms) of last inference run.
-    # Prevents inference from running more than once per second.
+    # Cooldown inference: timestamp (ms) run inference terakhir.
+    # Mencegah inference jalan lebih dari sekali per detik.
     consecutive_part_ready_frames: int = 0
     last_inference_ms: int = 0
-    # Inference interval (ms): minimum time between inference runs.
-    # 0 = unlimited (every frame), 200 = max ~5 fps inference.
+    # Interval inference (ms): waktu minimum antar-run inference.
+    # 0 = tidak terbatas (tiap frame), 200 = maks ~5 fps inference.
     inference_interval_ms: int = 0
-    # Manual release COOLDOWN: timestamp (seconds since epoch) until which
-    # re-clamp is blocked after IN1 (manual release). Prevents instant re-clamp.
+    # COOLDOWN manual release: timestamp (detik sejak epoch) sampai kapan
+    # re-clamp diblokir setelah IN1 (manual release). Mencegah re-clamp instan.
     manual_release_cooldown_until: float = 0.0
-    # Last activity timestamp (seconds since epoch) — updated on every frame process.
-    # Used for idle timeout auto-end.
+    # Timestamp aktivitas terakhir (detik sejak epoch) — diupdate tiap proses frame.
+    # Dipakai untuk auto-end idle timeout.
     last_activity_at: float = 0.0
-    # Consecutive reject counter — incremented on each committed reject decision.
-    # Reset to 0 on accept. Used to require N consecutive rejects before final reject.
+    # Counter reject berturut-turut — bertambah tiap keputusan reject di-commit.
+    # Direset ke 0 saat accept. Dipakai untuk mewajibkan N reject berturut-turut sebelum reject final.
     consecutive_reject_count: int = 0
-    # Max consecutive rejects allowed before auto-commit reject (0 = immediate, no delay).
+    # Maks reject berturut-turut yang diizinkan sebelum auto-commit reject (0 = langsung, tanpa jeda).
     max_consecutive_rejects: int = 0
-    # ── Part-Ready Latch State ──
-    # Once raw_part_ready is settled and clamp is requested, we latch so brief
-    # drops in raw_part_ready (shadow, vibration) do not cancel the cycle.
+    # ── State Latch Part-Ready ──
+    # Begitu raw_part_ready settled dan clamp diminta, kita latch supaya
+    # drop sesaat pada raw_part_ready (bayangan, getaran) tidak membatalkan siklus.
     part_ready_latched: bool = False
     part_ready_latched_at: datetime | None = None
-    # Timestamp when raw_part_ready last dropped while latched.
-    # Used to debounce latch release via release_ms.
+    # Timestamp saat raw_part_ready terakhir drop ketika latched.
+    # Dipakai untuk debounce pelepasan latch lewat release_ms.
     part_ready_unsettled_at: datetime | None = None
-    # ── Inspection Policy Stability Tracking ──
-    # Policy key = hash of (decision, reject_reason_code, detected_class, expected_class)
-    # Used to track consecutive stable frames before commit.
-    # Cycle-level timestamp: when ACCEPT was first seen in this clamping cycle.
-    # Persists across detection gaps (bridges holdover expiry) — reset only on commit
-    # or when the cycle resets (part removed). Used for commit_grace_ms check.
+    # ── Pelacakan Stabilitas Inspection Policy ──
+    # Policy key = hash dari (decision, reject_reason_code, detected_class, expected_class)
+    # Dipakai untuk melacak frame stabil berturut-turut sebelum commit.
+    # Timestamp level-siklus: saat ACCEPT pertama terlihat di siklus clamping ini.
+    # Bertahan melewati celah deteksi (menjembatani expiry holdover) — direset
+    # cuma saat commit atau saat siklus reset (part diangkat). Dipakai untuk cek commit_grace_ms.
     accept_cycle_started_at: datetime | None = None
     last_policy_key: str = ""
     policy_stable_started_at: datetime | None = None
     policy_stable_frames: int = 0
-    # After ACCEPT commit, wait for part to actually leave before allowing next cycle.
+    # Setelah commit ACCEPT, tunggu part benar-benar pergi sebelum mengizinkan siklus berikutnya.
     awaiting_part_removal_after_commit: bool = False
     policy_holdover_expires_at: datetime | None = None
     part_absent_started_at: datetime | None = None
-    # ── Inference Result Cache for Hand-Obstruction Handling ──
-    # When YOLO detects a valid class but part_ready drops temporarily (e.g., hand
-    # obstructing during commit wait), we cache the last valid inference result and
-    # timestamp. If part_ready returns within the grace window, we use the cached
-    # result instead of re-running inference (which might fail due to obstruction).
+    # ── Cache Hasil Inference untuk Menangani Tangan yang Menghalangi ──
+    # Saat YOLO mendeteksi class valid tapi part_ready sempat drop (mis. tangan
+    # menghalangi saat menunggu commit), kita cache hasil inference valid
+    # terakhir beserta timestamp-nya. Kalau part_ready kembali dalam jendela
+    # grace, kita pakai hasil cache itu daripada menjalankan ulang inference
+    # (yang mungkin gagal karena terhalang).
     last_valid_inference: dict[str, Any] | None = None
-    last_valid_inference_ts: float = 0.0  # monotonic timestamp
+    last_valid_inference_ts: float = 0.0  # timestamp monotonic

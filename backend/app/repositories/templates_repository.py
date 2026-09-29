@@ -6,8 +6,8 @@ from typing import Any
 from backend.app.repositories.base_json import JsonRepository
 from shared.contracts.templates import InspectionTemplate, template_from_dict
 
-# Valid lifecycle states and the allowed forward transitions.
-# "retired" can be reached from any state.
+# State lifecycle yang valid dan transisi maju yang diizinkan.
+# "retired" bisa dicapai dari state mana pun.
 _LIFECYCLE_TRANSITIONS: dict[str, set[str]] = {
     "draft":     {"review", "retired"},
     "review":    {"approved", "draft", "retired"},
@@ -25,7 +25,7 @@ def _sample_template(default_model_path: str = "", default_meta_path: str = "") 
             {
                 "id": 1,
                 "name": "QC Line A",
-                "description": "Default sample template for operator flow.",
+                "description": "Template sampel default untuk alur operator.",
                 "is_active": True,
                 "lifecycle_status": "published",
                 "current_version_id": 1,
@@ -38,13 +38,13 @@ def _sample_template(default_model_path: str = "", default_meta_path: str = "") 
                         "created_at": now,
                         "approved_by": None,
                         "approved_at": None,
-                        "change_note": "Initial version",
+                        "change_note": "Versi awal",
                         "template": {
                             "id": 1,
                             "version_id": 1,
                             "version_number": 1,
                             "name": "QC Line A",
-                            "description": "Default sample template for operator flow.",
+                            "description": "Template sampel default untuk alur operator.",
                             "is_active": True,
                             "camera": {
                                 "camera_index": 0,
@@ -201,7 +201,7 @@ class TemplatesRepository(JsonRepository):
             or [0]
         ) + 1
         now = datetime.now(UTC).isoformat()
-        change_note = str(payload.get("change_note") or "").strip() or "Initial version"
+        change_note = str(payload.get("change_note") or "").strip() or "Versi awal"
         template_payload = self._normalize_template_payload(
             {
                 **dict(payload),
@@ -281,7 +281,7 @@ class TemplatesRepository(JsonRepository):
         raise ValueError("Template not found.")
 
     def update_current_version(self, template_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        """Update the current version in-place without creating a new version entry."""
+        """Update versi saat ini secara in-place tanpa membuat entri versi baru."""
         store = self._payload()
         templates = store["templates"]
         now = datetime.now(UTC).isoformat()
@@ -290,8 +290,8 @@ class TemplatesRepository(JsonRepository):
                 continue
             current_versions = item.get("versions") or []
             if not current_versions:
-                raise ValueError("Template has no versions.")
-            # Find the current version entry
+                raise ValueError("Template belum punya versi.")
+            # Cari entri versi saat ini
             current_version_id = item.get("current_version_id")
             current_version = None
             for v in current_versions:
@@ -299,9 +299,9 @@ class TemplatesRepository(JsonRepository):
                     current_version = v
                     break
             if current_version is None:
-                # Fallback: use the last version
+                # Fallback: pakai versi terakhir
                 current_version = current_versions[-1]
-            # Normalize the updated payload
+            # Normalisasi payload yang diupdate
             template_payload = self._normalize_template_payload(
                 {
                     **dict(payload),
@@ -311,15 +311,15 @@ class TemplatesRepository(JsonRepository):
                     "is_active": bool(payload.get("is_active", item.get("is_active", True))),
                 }
             )
-            # Replace the current version's template data in-place
+            # Ganti data template versi saat ini secara in-place
             current_version["template"] = template_payload
             current_version["created_at"] = now
-            # Update top-level item fields
+            # Update field top-level item
             item["name"] = template_payload["name"]
             item["description"] = template_payload.get("description", "")
             item["is_active"] = bool(template_payload.get("is_active", item.get("is_active", True)))
             item["updated_at"] = now
-            # Keep lifecycle_status as-is (don't reset to draft for in-place update)
+            # Biarkan lifecycle_status apa adanya (jangan reset ke draft untuk update in-place)
             self.save(store)
             return template_payload
         raise ValueError("Template not found.")
@@ -351,7 +351,7 @@ class TemplatesRepository(JsonRepository):
         change_note: str | None = None,
     ) -> dict[str, Any]:
         if new_status not in _ALL_LIFECYCLE_STATES:
-            raise ValueError(f"Invalid lifecycle status '{new_status}'. Must be one of: {sorted(_ALL_LIFECYCLE_STATES)}")
+            raise ValueError(f"Status lifecycle '{new_status}' tidak valid. Harus salah satu dari: {sorted(_ALL_LIFECYCLE_STATES)}")
         store = self._payload()
         for item in store["templates"]:
             if int(item["id"]) != int(template_id):
@@ -360,13 +360,13 @@ class TemplatesRepository(JsonRepository):
             allowed = _LIFECYCLE_TRANSITIONS.get(current, set())
             if new_status not in allowed:
                 raise ValueError(
-                    f"Cannot transition from '{current}' to '{new_status}'. "
-                    f"Allowed transitions: {sorted(allowed) or 'none'}"
+                    f"Tidak bisa pindah dari '{current}' ke '{new_status}'. "
+                    f"Transisi yang diizinkan: {sorted(allowed) or 'tidak ada'}"
                 )
             now = datetime.now(UTC).isoformat()
             item["lifecycle_status"] = new_status
             item["updated_at"] = now
-            # Stamp approval metadata on the current version when approving/publishing
+            # Catat metadata approval di versi saat ini saat approve/publish
             if new_status in {"approved", "published"} and actor_id is not None:
                 for version in item.get("versions") or []:
                     if version["version_id"] == item.get("current_version_id"):
@@ -386,7 +386,7 @@ class TemplatesRepository(JsonRepository):
         raise ValueError("Template not found.")
 
     def rollback_version(self, template_id: int, version_id: int) -> dict[str, Any]:
-        """Set current_version_id to a previous version and reset lifecycle to 'draft'."""
+        """Set current_version_id ke versi sebelumnya dan reset lifecycle ke 'draft'."""
         store = self._payload()
         for item in store["templates"]:
             if int(item["id"]) != int(template_id):

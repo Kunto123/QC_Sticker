@@ -13,10 +13,10 @@ _shutdown_workers_stopped = False
 
 
 def shutdown_workers(*, reason: str = "shutdown") -> None:
-    """Stop process workers once, in a safe order.
+    """Hentikan worker proses sekali saja, dalam urutan yang aman.
 
-    PLC worker is stopped before the push worker so clamp release has the
-    highest chance to run before any other background teardown.
+    PLC worker dihentikan sebelum push worker supaya pelepasan clamp punya
+    peluang terbesar untuk jalan sebelum teardown background lainnya.
     """
     global _shutdown_workers_stopped
     with _shutdown_lock:
@@ -45,7 +45,7 @@ def shutdown_workers(*, reason: str = "shutdown") -> None:
 
 
 def install_process_shutdown_handlers() -> None:
-    """Install atexit and signal handlers for graceful worker shutdown."""
+    """Pasang handler atexit dan signal untuk shutdown worker yang rapi."""
     global _shutdown_hooks_installed
     with _shutdown_lock:
         if _shutdown_hooks_installed:

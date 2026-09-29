@@ -1,11 +1,11 @@
-"""Shared inference backend helpers.
+"""Helper backend inference bersama.
 
 Plan #13 — Full Abstraction Backend Inference.
 
-This module provides:
-- InferenceBackend abstract base class
-- Concrete backend subclasses: TFLiteBackend, OpenVINOBackend, ONNXBackend, UltralyticsBackend
-- Shared helper functions for YOLO output parsing, NMS, and label mapping
+Modul ini menyediakan:
+- Base class abstrak InferenceBackend
+- Subclass backend konkret: TFLiteBackend, OpenVINOBackend, ONNXBackend, UltralyticsBackend
+- Fungsi helper bersama untuk parsing output YOLO, NMS, dan pemetaan label
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ __all__ = [
 
 
 # ──────────────────────────────────────────────────────────────────
-# Shared helpers (used by all non-Ultralytics backends)
+# Helper bersama (dipakai semua backend non-Ultralytics)
 # ──────────────────────────────────────────────────────────────────
 
 def _parse_yolo_output(
@@ -48,20 +48,20 @@ def _parse_yolo_output(
     h_in: int,
     has_objectness: bool = False,
 ) -> list[tuple[float, int, float, float, float, float]]:
-    """Parse a YOLOv8/11 (or v5) raw output array into candidate detections.
+    """Parse array output mentah YOLOv8/11 (atau v5) jadi kandidat deteksi.
 
-    Handles both [N, C] and [C, N] layouts (auto-transposes if needed) and both
-    coordinate conventions Ultralytics exports use:
-      * OpenVINO / ONNX / .pt raw head: cx, cy, w, h in **input pixels** (0..imgsz)
-      * TFLite: cx, cy, w, h **normalized** to 0..1
-    Detected per tensor: if no box coordinate exceeds 1.5 the tensor is normalized.
+    Menangani layout [N, C] maupun [C, N] (auto-transpose kalau perlu) dan
+    kedua konvensi koordinat yang dipakai export Ultralytics:
+      * head mentah OpenVINO / ONNX / .pt: cx, cy, w, h dalam **piksel input** (0..imgsz)
+      * TFLite: cx, cy, w, h **ternormalisasi** ke 0..1
+    Terdeteksi per tensor: kalau tidak ada koordinat box yang melebihi 1.5, tensornya dianggap ternormalisasi.
 
-    Returns (conf, class_id, x1, y1, x2, y2) with x/y normalized to the letterboxed
-    *content* (padding removed), i.e. relative to the original ROI image.
+    Returns (conf, class_id, x1, y1, x2, y2) dengan x/y ternormalisasi terhadap
+    *content* letterbox (padding sudah dibuang), yaitu relatif terhadap gambar ROI asli.
 
     Args:
-        has_objectness: If True, row format is [cx, cy, w, h, obj_conf, cls0, cls1, ...]
-                       (YOLOv5 raw). If False, row format is [cx, cy, w, h, cls0, cls1, ...]
+        has_objectness: Kalau True, format baris [cx, cy, w, h, obj_conf, cls0, cls1, ...]
+                       (YOLOv5 mentah). Kalau False, format baris [cx, cy, w, h, cls0, cls1, ...]
                        (YOLOv8/11). Default False.
     """
     candidates: list[tuple[float, int, float, float, float, float]] = []
@@ -77,13 +77,13 @@ def _parse_yolo_output(
     class_scores = out[:, class_offset:]
     conf = class_scores.max(axis=1)
     if has_objectness:
-        conf = out[:, 4] * conf  # YOLOv5 raw: objectness × class score
+        conf = out[:, 4] * conf  # YOLOv5 mentah: objectness × class score
     keep = np.flatnonzero(conf >= conf_threshold)
     if keep.size == 0:
         return candidates
 
     boxes = out[keep, :4]
-    if float(np.abs(boxes).max()) <= 1.5:  # normalized (TFLite export)
+    if float(np.abs(boxes).max()) <= 1.5:  # ternormalisasi (export TFLite)
         boxes = boxes * np.array([w_in, h_in, w_in, h_in], dtype=np.float32)
     w_content = w_in - 2 * pad_left
     h_content = h_in - 2 * pad_top
@@ -106,13 +106,13 @@ def _apply_nms(
     candidates: list[tuple[float, int, float, float, float, float]],
     conf_threshold: float,
 ) -> list[dict[str, Any]]:
-    """Apply Non-Maximum Suppression to candidate detections.
+    """Terapkan Non-Maximum Suppression ke kandidat deteksi.
 
-    Returns list of detection dicts with normalized position coords.
+    Returns list dict deteksi dengan koordinat posisi ternormalisasi.
     """
     if not candidates:
         return []
-    roi_h, roi_w = 1.0, 1.0  # will be scaled by caller
+    roi_h, roi_w = 1.0, 1.0  # akan di-scale oleh pemanggil
     boxes_cv = [[c[2], c[3], c[4] - c[2], c[5] - c[3]] for c in candidates]
     scores_cv = [c[0] for c in candidates]
     indices = cv2.dnn.NMSBoxes(boxes_cv, scores_cv, conf_threshold, 0.45)
@@ -143,16 +143,16 @@ def _apply_names_map(
     names_map: dict[int, str],
     allowed_labels: set[str] | None,
 ) -> list[dict[str, Any]]:
-    """Map class_id → label name and filter by allowed_labels.
+    """Petakan class_id → nama label dan filter dengan allowed_labels.
 
-    When names_map is empty (no meta file), labels stay as string class_ids
-    and label-based filtering is skipped (returns all detections).
+    Kalau names_map kosong (tidak ada file meta), label tetap berupa
+    string class_id dan filter berbasis label dilewati (return semua deteksi).
     """
     filtered: list[dict[str, Any]] = []
     for det in detections:
         label = names_map.get(det["class_id"], str(det["class_id"]))
         det["label"] = label
-        # Only filter by label when class mapping is available
+        # Filter berdasarkan label cuma kalau ada mapping class
         if names_map and allowed_labels is not None:
             if label.strip().lower() not in allowed_labels:
                 continue
@@ -161,11 +161,11 @@ def _apply_names_map(
 
 
 # ──────────────────────────────────────────────────────────────────
-# Abstract base class
+# Base class abstrak
 # ──────────────────────────────────────────────────────────────────
 
 class InferenceBackend(ABC):
-    """Abstract interface for sticker detection inference backends."""
+    """Interface abstrak untuk backend inference deteksi sticker."""
 
     @abstractmethod
     def predict(
@@ -174,9 +174,9 @@ class InferenceBackend(ABC):
         vision: Any,
         expected_class: str | None = None,
     ) -> dict[str, Any]:
-        """Run inference on an image and return detection results.
+        """Jalankan inference pada satu gambar dan return hasil deteksi.
 
-        Returns dict with keys:
+        Returns dict dengan key:
             backend, mode, model_path, meta_path, class_names, detections,
             raw_detection_count, allowed_labels_filter, fallback_reason,
             device_mode, effective_device, device_backend,
@@ -186,11 +186,11 @@ class InferenceBackend(ABC):
 
 
 # ──────────────────────────────────────────────────────────────────
-# TFLite Backend
+# Backend TFLite
 # ──────────────────────────────────────────────────────────────────
 
 class TFLiteBackend(InferenceBackend):
-    """TFLite inference backend (CPU-friendly, via tflite_runtime / ai_edge_litert)."""
+    """Backend inference TFLite (ramah CPU, lewat tflite_runtime / ai_edge_litert)."""
 
     def __init__(
         self,
@@ -246,16 +246,16 @@ class TFLiteBackend(InferenceBackend):
             return payload
 
     def _load_tflite_interpreter(self, model_path: str, num_threads: int = 4):
-        """Load TFLite model via tflite_runtime (lightweight, no tensorflow needed)."""
+        """Muat model TFLite lewat tflite_runtime (ringan, tidak butuh tensorflow)."""
         resolved = str(Path(model_path).resolve())
-        # Cache key includes thread count so different configs get separate instances
+        # Cache key menyertakan jumlah thread supaya config berbeda dapat instance terpisah
         cache_key = f"{resolved}::t{num_threads}"
         with self._runtime_lock:
-            # Check cache
+            # Cek cache
             interp = self._loaded_models.get(cache_key)
             if interp is not None:
                 return interp
-            # Load model inside lock to prevent duplicate loads
+            # Muat model di dalam lock supaya tidak double-load
             try:
                 from ai_edge_litert.interpreter import Interpreter  # type: ignore
                 interpreter = Interpreter(model_path=resolved, num_threads=num_threads)
@@ -283,7 +283,7 @@ class TFLiteBackend(InferenceBackend):
                             interpreter = Interpreter(model_path=resolved)
                     except ImportError:
                         raise ModuleNotFoundError(
-                            "TFLite runtime not found. Install one of: "
+                            "TFLite runtime tidak ditemukan. Install salah satu: "
                             "pip install ai-edge-litert | pip install tflite-runtime | pip install tensorflow"
                         )
             interpreter.allocate_tensors()
@@ -296,9 +296,9 @@ class TFLiteBackend(InferenceBackend):
         target_size: tuple[int, int],
         color: tuple[int, int, int] = (114, 114, 114),
     ) -> tuple[np.ndarray, float, int, int]:
-        """Resize image preserving aspect ratio, pad remainder with gray.
+        """Resize gambar sambil menjaga aspect ratio, sisanya di-pad abu-abu.
         Returns: (padded_image, scale, pad_left, pad_top)
-        scale: factor applied to original image to fit in target_size
+        scale: faktor yang diterapkan ke gambar asli supaya muat di target_size
         """
         h_orig, w_orig = image.shape[:2]
         h_tgt, w_tgt = target_size
@@ -313,16 +313,16 @@ class TFLiteBackend(InferenceBackend):
         return canvas, scale, pad_left, pad_top
 
     def predict(self, image: np.ndarray, vision: Any, expected_class: str | None = None) -> dict[str, Any]:
-        """Run inference via TFLite interpreter (CPU-friendly)."""
+        """Jalankan inference lewat interpreter TFLite (ramah CPU)."""
         import time as _time
         t0 = _time.perf_counter()
 
         model_path = self._resolve_model_path(vision)
         if not model_path:
-            raise FileNotFoundError("Sticker model path is not configured.")
+            raise FileNotFoundError("Path model sticker belum dikonfigurasi.")
         resolved_model_path = Path(model_path)
         if not resolved_model_path.exists():
-            raise FileNotFoundError(f"TFLite model not found: {resolved_model_path}")
+            raise FileNotFoundError(f"Model TFLite tidak ditemukan: {resolved_model_path}")
 
         logger.debug("[tflite] loading model: %s", resolved_model_path)
         _num_threads = getattr(self._config, "inference_num_threads", 4)
@@ -334,7 +334,7 @@ class TFLiteBackend(InferenceBackend):
         input_dtype = input_details[0]["dtype"]
         logger.debug("[tflite] input_shape=%s dtype=%s", input_shape, input_dtype)
 
-        # Preprocess
+        # Preprocessing
         h_in, w_in = int(input_shape[1]), int(input_shape[2])
         img_padded, _scale, _pad_left, _pad_top = self._letterbox(image, (h_in, w_in))
         img_rgb = cv2.cvtColor(img_padded, cv2.COLOR_BGR2RGB)
@@ -346,14 +346,14 @@ class TFLiteBackend(InferenceBackend):
         t1 = _time.perf_counter()
         logger.debug("[tflite] preprocess=%.1fms", (t1 - t0) * 1000)
 
-        # Run inference
+        # Jalankan inference
         interpreter.set_tensor(input_details[0]["index"], input_data)
         interpreter.invoke()
         output_data = interpreter.get_tensor(output_details[0]["index"])
         t2 = _time.perf_counter()
         logger.debug("[tflite] invoke=%.1fms", (t2 - t1) * 1000)
 
-        # Parse output — use shared helper
+        # Parse output — pakai helper bersama
         candidates = []
         raw_box_count = 0
         roi_h, roi_w = image.shape[:2]
@@ -371,10 +371,10 @@ class TFLiteBackend(InferenceBackend):
                     w_in,
                     h_in,
                 )
-                raw_box_count = len(candidates)  # rows above threshold, before NMS
+                raw_box_count = len(candidates)  # baris di atas threshold, sebelum NMS
 
         detections = _apply_nms(candidates, float(vision.conf_threshold))
-        # Scale normalized coords to pixel space
+        # Scale koordinat ternormalisasi ke ruang piksel
         for det in detections:
             px = det["position"]
             px["x1"] = round(px["x1"] * roi_w, 2)
@@ -387,7 +387,7 @@ class TFLiteBackend(InferenceBackend):
         logger.debug("[tflite] total=%.1fms parse=%.1fms raw=%d filtered=%d",
                      (t3 - t0) * 1000, (t3 - t2) * 1000, len(candidates), len(detections))
 
-        # Load class names and filter — use shared helper
+        # Muat class names dan filter — pakai helper bersama
         meta = self._load_meta(self._resolve_meta_path(vision))
         class_names = meta.get("class_names", [])
         names_map = {i: name for i, name in enumerate(class_names)}
@@ -424,11 +424,11 @@ class TFLiteBackend(InferenceBackend):
 
 
 # ──────────────────────────────────────────────────────────────────
-# OpenVINO Backend
+# Backend OpenVINO
 # ──────────────────────────────────────────────────────────────────
 
 class OpenVINOBackend(InferenceBackend):
-    """OpenVINO IR inference backend (optimized for Intel CPU/iGPU)."""
+    """Backend inference OpenVINO IR (dioptimasi untuk CPU/iGPU Intel)."""
 
     def __init__(
         self,
@@ -484,21 +484,21 @@ class OpenVINOBackend(InferenceBackend):
             return payload
 
     def _load_openvino_model(self, model_path: str):
-        """Load OpenVINO IR model (.xml) — cached after first load."""
+        """Muat model OpenVINO IR (.xml) — di-cache setelah load pertama."""
         resolved = str(Path(model_path).resolve())
         with self._runtime_lock:
-            # Check cache
+            # Cek cache
             model = self._loaded_models.get(resolved)
             if model is not None:
                 return model
-            # Load model inside lock to prevent duplicate compilations
+            # Muat model di dalam lock supaya tidak double-compile
             try:
                 from openvino import Core  # type: ignore  # OpenVINO 2024.x+
             except ImportError:
                 try:
                     from openvino.runtime import Core  # type: ignore  # Legacy 2022.x–2023.x
                 except ImportError:
-                    raise ModuleNotFoundError("openvino required: pip install openvino")
+                    raise ModuleNotFoundError("openvino wajib diinstall: pip install openvino")
             ie = Core()
             ov_model = ie.read_model(model=resolved)
             _n = getattr(self._config, "inference_num_threads", 4)
@@ -514,7 +514,7 @@ class OpenVINOBackend(InferenceBackend):
         target_size: tuple[int, int],
         color: tuple[int, int, int] = (114, 114, 114),
     ) -> tuple[np.ndarray, float, int, int]:
-        """Resize image preserving aspect ratio, pad remainder with gray.
+        """Resize gambar sambil menjaga aspect ratio, sisanya di-pad abu-abu.
         Returns: (padded_image, scale, pad_left, pad_top)
         """
         h_orig, w_orig = image.shape[:2]
@@ -530,22 +530,22 @@ class OpenVINOBackend(InferenceBackend):
         return canvas, scale, pad_left, pad_top
 
     def predict(self, image: np.ndarray, vision: Any, expected_class: str | None = None) -> dict[str, Any]:
-        """Run inference via OpenVINO IR (optimized for Intel CPU/iGPU)."""
+        """Jalankan inference lewat OpenVINO IR (dioptimasi untuk CPU/iGPU Intel)."""
         import time as _time
         t0 = _time.perf_counter()
 
         model_path = self._resolve_model_path(vision)
         if not model_path:
-            raise FileNotFoundError("Sticker model path is not configured.")
+            raise FileNotFoundError("Path model sticker belum dikonfigurasi.")
         resolved_model_path = Path(model_path)
         if not resolved_model_path.exists():
-            raise FileNotFoundError(f"OpenVINO model not found: {resolved_model_path}")
+            raise FileNotFoundError(f"Model OpenVINO tidak ditemukan: {resolved_model_path}")
 
         compiled = self._load_openvino_model(str(resolved_model_path))
         input_layer = compiled.input(0)
-        input_shape = tuple(input_layer.shape)  # e.g. (1, 3, 640, 640) NCHW or (1, 640, 640, 3) NHWC
+        input_shape = tuple(input_layer.shape)  # mis. (1, 3, 640, 640) NCHW atau (1, 640, 640, 3) NHWC
 
-        # Determine layout: NCHW if dim[1] in {1,3}, else assume NHWC
+        # Tentukan layout: NCHW kalau dim[1] di {1,3}, selain itu anggap NHWC
         if len(input_shape) == 4 and input_shape[1] in (1, 3):
             _, _c, h_in, w_in = input_shape
             nchw = True
@@ -553,7 +553,7 @@ class OpenVINOBackend(InferenceBackend):
             _, h_in, w_in, _c = input_shape
             nchw = False
 
-        # Letterbox preprocessing (same as TFLite)
+        # Preprocessing letterbox (sama seperti TFLite)
         img_padded, _scale, _pad_left, _pad_top = self._letterbox(image, (int(h_in), int(w_in)))
         img_rgb = cv2.cvtColor(img_padded, cv2.COLOR_BGR2RGB)
         img_norm = img_rgb.astype(np.float32) / 255.0
@@ -568,7 +568,7 @@ class OpenVINOBackend(InferenceBackend):
         out = list(results.values())[0]
         t2 = _time.perf_counter()
 
-        # Parse output — same YOLO format as TFLite/ONNX [1, 6, 8400] — use shared helper
+        # Parse output — format YOLO sama seperti TFLite/ONNX [1, 6, 8400] — pakai helper bersama
         candidates = []
         raw_box_count = 0
         roi_h, roi_w = image.shape[:2]
@@ -585,10 +585,10 @@ class OpenVINOBackend(InferenceBackend):
                     int(w_in),
                     int(h_in),
                 )
-                raw_box_count = len(candidates)  # rows above threshold, before NMS
+                raw_box_count = len(candidates)  # baris di atas threshold, sebelum NMS
 
         detections = _apply_nms(candidates, float(vision.conf_threshold))
-        # Scale normalized coords to pixel space
+        # Scale koordinat ternormalisasi ke ruang piksel
         for det in detections:
             px = det["position"]
             px["x1"] = round(px["x1"] * roi_w, 2)
@@ -601,7 +601,7 @@ class OpenVINOBackend(InferenceBackend):
         logger.debug("[openvino] total=%.1fms parse=%.1fms raw=%d filtered=%d",
                     (t3 - t0) * 1000, (t3 - t2) * 1000, len(candidates), len(detections))
 
-        # Class name mapping (same as TFLite) — use shared helper
+        # Pemetaan nama class (sama seperti TFLite) — pakai helper bersama
         meta = self._load_meta(self._resolve_meta_path(vision))
         class_names = meta.get("class_names", [])
         names_map = {i: name for i, name in enumerate(class_names)}
@@ -635,11 +635,11 @@ class OpenVINOBackend(InferenceBackend):
 
 
 # ──────────────────────────────────────────────────────────────────
-# ONNX Backend
+# Backend ONNX
 # ──────────────────────────────────────────────────────────────────
 
 class ONNXBackend(InferenceBackend):
-    """ONNX Runtime inference backend (CPU-friendly, no GPU needed)."""
+    """Backend inference ONNX Runtime (ramah CPU, tidak butuh GPU)."""
 
     def __init__(
         self,
@@ -695,26 +695,26 @@ class ONNXBackend(InferenceBackend):
             return payload
 
     def _load_onnx_session(self, model_path: str):
-        """Load ONNX model via onnxruntime (CPU-friendly). Thread-safe."""
+        """Muat model ONNX lewat onnxruntime (ramah CPU). Thread-safe."""
         resolved = str(Path(model_path).resolve())
         with self._runtime_lock:
-            # Check cache
+            # Cek cache
             sess = self._loaded_models.get(resolved)
             if sess is not None:
                 return sess
-            # Load model inside lock to prevent duplicate sessions
+            # Muat model di dalam lock supaya tidak dobel session
             try:
                 import onnxruntime as ort  # type: ignore
             except ImportError:
                 raise ModuleNotFoundError(
-                    "onnxruntime is required for ONNX inference. "
-                    "Install it with: pip install onnxruntime"
+                    "onnxruntime wajib diinstall untuk inference ONNX. "
+                    "Install dengan: pip install onnxruntime"
                 )
             opts = ort.SessionOptions()
             opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
             _n = getattr(self._config, "inference_num_threads", 4)
-            opts.intra_op_num_threads = _n   # threads within one op (matmul, conv)
-            opts.inter_op_num_threads = 1    # parallel between ops — 1 sufficient for small models
+            opts.intra_op_num_threads = _n   # thread di dalam satu op (matmul, conv)
+            opts.inter_op_num_threads = 1    # paralel antar op — 1 sudah cukup untuk model kecil
             sess = ort.InferenceSession(resolved, sess_options=opts, providers=["CPUExecutionProvider"])
             self._loaded_models[resolved] = sess
             return sess
@@ -725,7 +725,7 @@ class ONNXBackend(InferenceBackend):
         target_size: tuple[int, int],
         color: tuple[int, int, int] = (114, 114, 114),
     ) -> tuple[np.ndarray, float, int, int]:
-        """Resize image preserving aspect ratio, pad remainder with gray.
+        """Resize gambar sambil menjaga aspect ratio, sisanya di-pad abu-abu.
         Returns: (padded_image, scale, pad_left, pad_top)
         """
         h_orig, w_orig = image.shape[:2]
@@ -741,23 +741,23 @@ class ONNXBackend(InferenceBackend):
         return canvas, scale, pad_left, pad_top
 
     def predict(self, image: np.ndarray, vision: Any, expected_class: str | None = None) -> dict[str, Any]:
-        """Run inference via ONNX Runtime (CPU-friendly, no GPU needed)."""
+        """Jalankan inference lewat ONNX Runtime (ramah CPU, tidak butuh GPU)."""
         import time as _time
         t0 = _time.perf_counter()
 
         model_path = self._resolve_model_path(vision)
         if not model_path:
-            raise FileNotFoundError("Sticker model path is not configured.")
+            raise FileNotFoundError("Path model sticker belum dikonfigurasi.")
         resolved_model_path = Path(model_path)
         if not resolved_model_path.exists():
-            raise FileNotFoundError(f"ONNX model not found: {resolved_model_path}")
+            raise FileNotFoundError(f"Model ONNX tidak ditemukan: {resolved_model_path}")
 
         logger.debug("[onnx] loading model: %s", resolved_model_path)
         sess = self._load_onnx_session(str(resolved_model_path))
         onnx_input = sess.get_inputs()[0]
         input_name = onnx_input.name
-        # Ultralytics ONNX export is NCHW [1, 3, 640, 640]; a TFLite-origin ONNX is NHWC.
-        # Dynamic dims come back as str/None → fall back to 640.
+        # Export ONNX Ultralytics itu NCHW [1, 3, 640, 640]; ONNX asal-TFLite itu NHWC.
+        # Dim dinamis balik sebagai str/None → fallback ke 640.
         raw_shape = list(onnx_input.shape or [])
         dims = [int(d) if isinstance(d, (int, np.integer)) and int(d) > 0 else None for d in raw_shape]
         nchw = len(dims) == 4 and dims[1] in (1, 3)
@@ -769,7 +769,7 @@ class ONNXBackend(InferenceBackend):
             h_in, w_in = 640, 640
         logger.debug("[onnx] input_name=%s shape=%s layout=%s", input_name, raw_shape, "NCHW" if nchw else "NHWC")
 
-        # Preprocess: letterbox → BGR→RGB → normalize /255 → float32
+        # Preprocessing: letterbox → BGR→RGB → normalize /255 → float32
         _onnx_pad, _onnx_scale, _onnx_pad_left, _onnx_pad_top = self._letterbox(image, (h_in, w_in))
         img_rgb = cv2.cvtColor(_onnx_pad, cv2.COLOR_BGR2RGB)
         img_norm = img_rgb.astype(np.float32) / 255.0
@@ -781,14 +781,14 @@ class ONNXBackend(InferenceBackend):
         logger.debug("[onnx] preprocess=%.1fms", (t1 - t0) * 1000)
 
         # Inference
-        out = sess.run(None, {input_name: input_data})[0]  # [1, 6, 8400] or similar
+        out = sess.run(None, {input_name: input_data})[0]  # [1, 6, 8400] atau serupa
         t2 = _time.perf_counter()
         logger.debug("[onnx] invoke=%.1ffms", (t2 - t1) * 1000)
 
-        # Parse output — YOLOv11 format: rows are [cx, cy, w, h, cls0_score, cls1_score, ...]
-        # No separate objectness score; class_probs ARE the confidence.
-        # Use shared helper.
-        out_raw = out[0]  # → [6, 8400] or [8400, 6]
+        # Parse output — format YOLOv11: baris [cx, cy, w, h, cls0_score, cls1_score, ...]
+        # Tidak ada skor objectness terpisah; class_probs ADALAH confidence-nya.
+        # Pakai helper bersama.
+        out_raw = out[0]  # → [6, 8400] atau [8400, 6]
         if out_raw.ndim == 2 and out_raw.shape[0] < out_raw.shape[1]:
             out_raw = out_raw.T  # → [N, C]
 
@@ -802,7 +802,7 @@ class ONNXBackend(InferenceBackend):
         )
 
         detections = _apply_nms(candidates, float(vision.conf_threshold))
-        # Scale normalized coords to pixel space
+        # Scale koordinat ternormalisasi ke ruang piksel
         roi_h, roi_w = image.shape[:2]
         for det in detections:
             px = det["position"]
@@ -816,7 +816,7 @@ class ONNXBackend(InferenceBackend):
         logger.debug("[onnx] total=%.1fms parse=%.1fms raw=%d filtered=%d",
                      (t3 - t0) * 1000, (t3 - t2) * 1000, len(candidates), len(detections))
 
-        # Load class names — use shared helper
+        # Muat class names — pakai helper bersama
         meta = self._load_meta(self._resolve_meta_path(vision))
         class_names = meta.get("class_names", [])
         names_map = {i: name for i, name in enumerate(class_names)}
@@ -852,11 +852,11 @@ class ONNXBackend(InferenceBackend):
 
 
 # ──────────────────────────────────────────────────────────────────
-# Ultralytics Backend
+# Backend Ultralytics
 # ──────────────────────────────────────────────────────────────────
 
 class UltralyticsBackend(InferenceBackend):
-    """Ultralytics YOLO inference backend (supports GPU via device resolution)."""
+    """Backend inference Ultralytics YOLO (mendukung GPU lewat resolusi device)."""
 
     def __init__(
         self,
@@ -976,10 +976,10 @@ class UltralyticsBackend(InferenceBackend):
     def predict(self, image: np.ndarray, vision: Any, expected_class: str | None = None) -> dict[str, Any]:
         model_path = self._resolve_model_path(vision)
         if not model_path:
-            raise FileNotFoundError("Sticker model path is not configured.")
+            raise FileNotFoundError("Path model sticker belum dikonfigurasi.")
         resolved_model_path = Path(model_path)
         if not resolved_model_path.exists():
-            raise FileNotFoundError(f"Sticker model not found: {resolved_model_path}")
+            raise FileNotFoundError(f"Model sticker tidak ditemukan: {resolved_model_path}")
 
         model = self._get_ultralytics_model(str(resolved_model_path))
         kwargs: dict[str, Any] = {
@@ -992,12 +992,12 @@ class UltralyticsBackend(InferenceBackend):
         result = model.predict(image, **kwargs)[0]
         names = result.names or {}
         raw_box_count = int(len(result.boxes)) if result.boxes is not None else 0
-        # Build allowed labels from vision.classes + anchor classes + expected_class
+        # Bangun allowed labels dari vision.classes + anchor classes + expected_class
         allowed_label_values = [str(label) for label in (vision.classes or []) if str(label).strip()]
-        # Always include expected_class (from template sticker.expected_class)
+        # Selalu sertakan expected_class (dari template sticker.expected_class)
         if expected_class and str(expected_class).strip():
             allowed_label_values.append(str(expected_class).strip())
-        # Normalize to lowercase for case-insensitive matching
+        # Normalisasi ke lowercase untuk matching case-insensitive
         allowed_labels = {label.strip().lower() for label in allowed_label_values} or None
         allowed_label_keys = ({self._normalize_label_key(label) for label in allowed_label_values if self._normalize_label_key(label)} or None)
         detections = self._normalize_detections(

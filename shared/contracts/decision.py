@@ -6,12 +6,12 @@ from typing import Any
 
 @dataclass(slots=True)
 class Decision:
-    """Uniform evaluation result — the ONLY output type from any ModeEvaluator.
+    """Hasil evaluasi yang seragam — SATU-SATUNYA tipe output dari ModeEvaluator manapun.
 
-    All downstream systems (PLC, logging DB, ACC/NG display) read this struct.
-    They NEVER access raw model output (detections, heatmaps, etc.).
+    Semua sistem hilir (PLC, DB logging, tampilan ACC/NG) membaca struct ini.
+    Mereka TIDAK PERNAH mengakses output model mentah (detections, heatmap, dll).
 
-    ``details`` payload per mode:
+    Payload ``details`` per mode:
 
     **sticker**:
         mode: "sticker"
@@ -31,13 +31,13 @@ class Decision:
 
     **counter**:
         mode: "counter"
-        rois: list[dict]  # each has: name, ok, classes{name, detected, min, max, ok}, total_detected, foreign_classes
+        rois: list[dict]  # tiap elemen punya: name, ok, classes{name, detected, min, max, ok}, total_detected, foreign_classes
         consecutive_ok: int
         consecutive_needed: int
 
     **defect**:
         mode: "defect"
-        rois: list[dict]  # each has: name, ok, anomaly_score, threshold, heatmap_ref (optional)
+        rois: list[dict]  # tiap elemen punya: name, ok, anomaly_score, threshold, heatmap_ref (opsional)
     """
     accept: bool
     reason_code: str | None = None

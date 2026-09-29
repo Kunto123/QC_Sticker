@@ -94,7 +94,7 @@ class InspectionSessionService:
             if app_config is not None
             else 2000
         )
-        # System-wide settle default: used when a template's part_ready_settle_ms is None.
+        # Default settle sistem: dipakai kalau part_ready_settle_ms template-nya None.
         self._default_settle_ms: int = (
             max(0, int(app_config.part_ready_settle_ms_default))
             if app_config is not None
@@ -148,7 +148,7 @@ class InspectionSessionService:
             if app_config is not None
             else 300
         )
-# Inspection policy settings
+# Pengaturan inspection policy
         self._hard_reject_reasons: set[str] = set(
             r.strip().upper()
             for r in app_config.inspect_hard_reject_reasons.split(",")
@@ -170,7 +170,7 @@ class InspectionSessionService:
             max(0, int(app_config.accept_stable_ms))
             if app_config is not None else 200
         )
-        # Inference cache TTL (ms) — how long cached inference is considered fresh
+        # TTL cache inference (ms) — berapa lama hasil inference cache dianggap masih fresh
         self._inference_cache_ttl_ms: int = (
             max(100, int(app_config.inference_cache_ttl_ms))
             if app_config is not None else 10000
@@ -179,33 +179,33 @@ class InspectionSessionService:
             max(1.0, float(getattr(app_config, "inference_timeout_s", 5.0)))
             if app_config is not None else 5.0
         )
-        # Fallback line_id for sessions started without one (the desktop
-        # client never sends line_id — see start_session below).
+        # Fallback line_id untuk session yang dimulai tanpa line_id (client
+        # desktop tidak pernah mengirim line_id — lihat start_session di bawah).
         self._default_line_id: str = (
             str(getattr(app_config, "machine_line_id", "") or "").strip()
             if app_config is not None else ""
         )
-        # Register PLC state change callback
+        # Daftarkan callback perubahan state PLC
         if self._plc_worker is not None:
             self._plc_worker.set_on_state_change_callback(self._on_plc_state_change)
-            # Item 1: register actuation result callback for ACK/NACK reconciliation
+            # Item 1: daftarkan callback hasil aktuasi untuk rekonsiliasi ACK/NACK
             self._plc_worker.set_on_actuation_result_callback(self._on_actuation_result)
 
-        # Item 1: pending actuation results awaiting ACK/NACK
+        # Item 1: hasil aktuasi yang masih menunggu ACK/NACK
         # Maps event_id -> {decision, result_id, status}
         self._pending_actuations: dict[str, dict] = {}
 
     def apply_machine_settings(self, settings) -> None:
-        """Live-apply MachineSettings.timing + identity (called after a Machine Settings save)."""
+        """Live-apply MachineSettings.timing + identity (dipanggil setelah save Machine Settings)."""
         from dataclasses import asdict
         self.update_timing_settings(asdict(settings.timing))
         self._default_line_id = str(getattr(settings.identity, "line", "") or "").strip()
 
     def update_timing_settings(self, data: dict) -> None:
-        """Override timing/inspection settings at runtime (called after Machine Settings save).
+        """Override setting timing/inspection saat runtime (dipanggil setelah save Machine Settings).
 
-        Accepts a flat dict matching TimingConfig schema, or a nested 'timing' key.
-        Falls back to current value if key is missing (safe for partial updates).
+        Menerima dict flat sesuai schema TimingConfig, atau key 'timing' nested.
+        Fallback ke nilai saat ini kalau key tidak ada (aman untuk update partial).
         """
         timing = data.get("timing", data) if isinstance(data, dict) else {}
 
@@ -252,7 +252,7 @@ class InspectionSessionService:
             cooldown_until = time.time() + (self._phase_next_part_delay_ms / 1000.0)
             with self._lock:
                 for state in self._sessions.values():
-                    # Reset clamp gate only — keep settle/reject state intact
+                    # Reset clamp gate saja — state settle/reject dibiarkan utuh
                     state.plc_part_ready_triggered = False
                     state.inspection_result_cache = None
                     state.operator_state = "IDLE"
@@ -262,7 +262,7 @@ class InspectionSessionService:
                     state.consecutive_part_ready_frames = 0          # ← reset untuk part berikutnya
                     state.part_ready_settle_started_at = None
                     state.last_inference_ms = 0
-                    # Unlock PLC cycle
+                    # Unlock siklus PLC
                     if self._plc_worker is not None:
                         self._plc_worker.unlock_cycle(reason=f"plc_idle_after_{old_state}")
                     state.manual_release_cooldown_until = cooldown_until
@@ -272,8 +272,8 @@ class InspectionSessionService:
                     state.plc_clamp_event_id = None
                     state.operator_sticker_delay_started_at = 0.0
                     state.operator_sticker_ready_at = 0.0
-                    state.part_ready_settled_at = None  # reset timeout tracker for new cycle
-                    # Reset accept-cycle counters — mencegah commit instan dari akumulasi selama hold
+                    state.part_ready_settled_at = None  # reset tracker timeout untuk siklus baru
+                    # Reset counter accept-cycle — mencegah commit instan dari akumulasi selama hold
                     state.accept_cycle_started_at = None
                     state.policy_stable_frames = 0
                     state.policy_stable_started_at = None
@@ -287,19 +287,19 @@ class InspectionSessionService:
             )
 
         # Saat PLC mulai clamp baru (IDLE → CLAMPING): ini adalah siklus fisik baru.
-        # Clear inference cache only
+        # Bersihkan cache inference saja
         if new_state == "CLAMPING" and old_state == "IDLE":
             with self._lock:
                 for state in self._sessions.values():
-                    state.inference_result_cache = None  # flush stale cache
+                    state.inference_result_cache = None  # flush cache basi
                     state.inference_result_ts = 0.0       # paksa re-infer
             logger.info("[inspection] PLC CLAMPING — inference cache cleared for new cycle")
 
     def _on_actuation_result(self, event_id: str | None, decision: str, ok: bool, reason: str = "") -> None:
-        """Item 1: handle actuation ACK/NACK from PLC worker.
+        """Item 1: tangani ACK/NACK aktuasi dari PLC worker.
 
-        On ACK (ok=True): mark pending result as "actuated".
-        On NACK (ok=False): mark pending result as "actuation_failed".
+        Saat ACK (ok=True): tandai result pending sebagai "actuated".
+        Saat NACK (ok=False): tandai result pending sebagai "actuation_failed".
         """
         if not event_id:
             return
@@ -412,8 +412,8 @@ class InspectionSessionService:
                 "fallback_delay_ms": self._plc_clamp_feedback_fallback_delay_ms,
             }
         if not feedback_ready:
-            # PLC masih IDLE — enqueue_part_ready diblock (reclamp interval / cycle lock).
-            # Reset agar session retry di frame berikutnya.
+            # PLC masih IDLE — enqueue_part_ready diblokir (reclamp interval / cycle lock).
+            # Reset supaya session retry di frame berikutnya.
             state.plc_part_ready_triggered = False
             state.plc_clamp_requested_at = 0.0
             state.plc_clamp_ready_at = 0.0
@@ -508,9 +508,9 @@ class InspectionSessionService:
     ) -> dict[str, Any]:
         template = self._template_runtime.resolve_template_by_version(template_version_id)
         session_id = uuid.uuid4().hex
-        # The desktop client never sends line_id (line/station slots were
-        # removed 2026-09-18) — fall back to the configured machine identity
-        # so "Line" on the SQL push isn't silently null.
+        # Client desktop tidak pernah mengirim line_id (slot line/station sudah
+        # dihapus 2026-09-18) — fallback ke identitas mesin yang dikonfigurasi
+        # supaya "Line" di push SQL tidak diam-diam jadi null.
         effective_line_id = line_id or (self._default_line_id or None)
         state = SessionState(
             session_id=session_id,
@@ -579,27 +579,27 @@ class InspectionSessionService:
         state.status = SessionStatus.STOPPED
         with self._lock:
             self._sessions.pop(session_id, None)
-        # Shutdown background inference thread cleanly
+        # Matikan thread inference background dengan bersih
         if state._inference_executor is not None:
             state._inference_executor.shutdown(wait=False)
             state._inference_executor = None
         return self._session_payload(state)
 
     def has_session(self, session_id: str) -> bool:
-        """Return True if a session with this id is currently active."""
+        """Return True kalau session dengan id ini sedang aktif."""
         with self._lock:
             return session_id in self._sessions
 
     def manual_release(self, session_id: str, *, reason: str = "manual_operator") -> dict[str, Any]:
-        """Operator-triggered NEUTRAL release.
+        """Release NEUTRAL yang di-trigger operator.
 
-        Unclamps the current part and resets the clamping/inspection cycle WITHOUT
-        committing any result. No accept/reject is logged and counters are unchanged.
-        Used when a part is still being inspected (no ACCEPT yet) but the operator
-        wants to remove it (e.g. obviously wrong part, mis-loaded part).
+        Melepas clamp part saat ini dan reset siklus clamping/inspection TANPA
+        commit hasil apa pun. Tidak ada accept/reject yang di-log dan counter tidak berubah.
+        Dipakai saat part masih diinspeksi (belum ACCEPT) tapi operator mau
+        melepasnya (mis. part jelas salah, part salah pasang).
         """
         state = self._require_session(session_id)
-        # Reset the cycle under lock — PLC callback thread also accesses session state.
+        # Reset siklus di dalam lock — thread callback PLC juga mengakses session state.
         with self._lock:
             state.part_ready_latched = False
             state.part_ready_latched_at = None
@@ -622,13 +622,13 @@ class InspectionSessionService:
             state.inference_accept_count = 0
             state.inference_last_counted_generation = -1
             state.inference_accept_first_ts = 0.0
-            # Blackout to prevent immediate re-clamp of the same still-present part.
+            # Blackout untuk mencegah re-clamp instan pada part yang sama yang masih ada.
             if self._phase_next_part_delay_ms > 0:
                 state.manual_release_cooldown_until = max(
                     float(getattr(state, "manual_release_cooldown_until", 0.0) or 0.0),
                     time.time() + (self._phase_next_part_delay_ms / 1000.0),
                 )
-        # Unclamp via PLC — neutral, no decision recorded.
+        # Lepas clamp lewat PLC — netral, tidak ada decision yang dicatat.
         if self._plc_worker is not None:
             try:
                 self._plc_worker.force_release(reason=reason)
@@ -644,26 +644,27 @@ class InspectionSessionService:
         is_non_hard_reject: bool,
         now_s: float,
     ) -> bool:
-        """Count consecutive fresh ACCEPT inference results toward `accept_stable_frames`.
+        """Hitung hasil inference ACCEPT fresh berturut-turut untuk `accept_stable_frames`.
 
-        A generation is one completed inference. Every frame reads the newest
-        generation; a generation that was read by a frame which was *not* effective-
-        accept (NOT_FOUND / low-conf outside the holdover window) is never counted, so
-        a gap in the counted generation numbers means the sticker was lost for longer
-        than `accept_holdover_ms` → the streak restarts at 1. Consecutive generations
-        count regardless of how long inference takes (the old `accept_stable_ms × 3`
-        window silently made `accept_stable_frames ≥ 2` unreachable whenever
-        `accept_stable_ms` was smaller than the inference cadence — HANDOFF §9e).
+        Satu generation adalah satu inference yang selesai. Tiap frame membaca
+        generation terbaru; generation yang dibaca oleh frame yang *bukan* effective-
+        accept (NOT_FOUND / low-conf di luar window holdover) tidak pernah dihitung,
+        jadi ada gap di nomor generation yang terhitung berarti sticker hilang lebih
+        lama dari `accept_holdover_ms` → streak restart dari 1. Generation berturut-turut
+        dihitung terlepas dari berapa lama inference berjalan (window lama
+        `accept_stable_ms × 3` diam-diam membuat `accept_stable_frames ≥ 2` tidak
+        mungkin tercapai kapan pun `accept_stable_ms` lebih kecil dari cadence
+        inference — HANDOFF §9e).
 
-        Returns True when the streak was restarted (caller resets the policy clock).
+        Returns True kalau streak-nya di-restart (pemanggil reset jam policy).
         """
         if is_non_hard_reject:
-            # Non-hard reject is pure noise — do NOT touch any accept counters.
-            # The system must keep inferring; non-hard reject should not break an
-            # existing accept streak (holdover decides that, via skipped generations).
+            # Non-hard reject itu murni noise — JANGAN sentuh counter accept apa pun.
+            # Sistem harus tetap infer; non-hard reject tidak boleh memutus streak
+            # accept yang sedang berjalan (holdover yang menentukan itu, lewat generation yang dilewati).
             return False
         if not effective_is_accept:
-            # Known hard-reject reason — reset counters; this breaks an accept streak.
+            # Alasan hard-reject yang dikenal — reset counter; ini memutus streak accept.
             state.inference_accept_count = 0
             state.inference_accept_first_ts = 0.0
             state.inference_last_counted_generation = -1
@@ -671,7 +672,7 @@ class InspectionSessionService:
         generation = int(state.inference_result_generation)
         last = int(state.inference_last_counted_generation)
         if generation <= last:
-            return False  # same generation — don't double-count
+            return False  # generation sama — jangan dihitung dobel
         streak_broken = last >= 0 and generation > last + 1 and state.inference_accept_first_ts > 0
         state.inference_last_counted_generation = generation
         if state.inference_accept_first_ts <= 0 or streak_broken:
@@ -712,12 +713,12 @@ class InspectionSessionService:
         username: str | None = None,
         user_id: int | None = None,
     ) -> dict[str, Any]:
-        """Process a pre-decoded numpy BGR frame for the given session.
+        """Proses satu frame BGR numpy yang sudah di-decode untuk session ini.
 
-        Called by ``process_frame`` (which decodes base64 first) and by the
-        WebSocket streaming handler (which receives raw JPEG bytes directly).
-        ``decode_ms`` carries the caller's decode timing so it is reflected in
-        the returned timings payload.
+        Dipanggil oleh ``process_frame`` (yang decode base64 dulu) dan oleh
+        handler streaming WebSocket (yang menerima byte JPEG mentah langsung).
+        ``decode_ms`` membawa timing decode pemanggil supaya tercermin di
+        payload timings yang dikembalikan.
         """
         total_started = time.perf_counter()
         timings: dict[str, float] = {"decode_ms": float(decode_ms)}
@@ -749,17 +750,17 @@ class InspectionSessionService:
             state.sticker_roi_override,
         )
         timings["sticker_roi_crop_ms"] = _elapsed_ms(roi_crop_started)
-        # Blackout gate: after commit, force "part not found" for phase_next_part_delay_ms
-        # to give operator time to swap part. Re-arms automatically when timer expires.
+        # Gate blackout: setelah commit, paksa "part not found" selama phase_next_part_delay_ms
+        # supaya operator punya waktu ganti part. Otomatis aktif lagi saat timer habis.
         _now_s = time.time()
         _blackout_until = float(getattr(state, "manual_release_cooldown_until", 0.0) or 0.0)
         _in_blackout = _now_s < _blackout_until
         if _in_blackout:
-            # Force all cycle state to idle
+            # Paksa semua state siklus jadi idle
             state.part_ready_latched = False
             state.consecutive_part_ready_frames = 0
             state.plc_part_ready_triggered = False
-            # Build and return minimal "part not found" response — skip all processing
+            # Bangun dan return response "part not found" minimal — lewati semua pemrosesan
             phase_remaining_ms = round((_blackout_until - _now_s) * 1000.0, 1)
             return {
                 "session": self._session_payload(state),
@@ -798,8 +799,8 @@ class InspectionSessionService:
                     "block_reason": "blackout_reset",
                 },
                 "sticker_detection": {},
-                # Blackout = idle reset window, no inspection ran → neutral decision
-                # (None renders as "WAITING" on the client, not a spurious reject).
+                # Blackout = window reset idle, tidak ada inspeksi berjalan → decision netral
+                # (None tampil sebagai "WAITING" di client, bukan reject palsu).
                 "validation": {
                     "decision": None,
                     "reject_reason_code": None,
@@ -814,20 +815,20 @@ class InspectionSessionService:
                 "timings": {**timings, "event_state_ms": 0.0, "total_ms": _elapsed_ms(total_started)},
             }
 # ------------------------------------------------------------------
-        # Settle — frame-count based
+        # Settle — berbasis hitungan frame
         # Tunggu N frame berturut-turut di atas threshold sebelum clamp engage.
         # Jika sudah latched, abaikan raw state — tetap settled.
         # ------------------------------------------------------------------
-        # Prefer ms-based settle if configured; fall back to system default (part_ready_settle_ms_default)
-        # settle_ms == 0 means immediate settle (no wait)
+        # Utamakan settle berbasis ms kalau dikonfigurasi; fallback ke default sistem (part_ready_settle_ms_default)
+        # settle_ms == 0 berarti settle langsung (tanpa tunggu)
         _settle_ms = getattr(state.template.sticker, "part_ready_settle_ms", None)
         if _settle_ms is not None:
             if _settle_ms == 0:
-                _settle_frames = 0  # immediate settle
+                _settle_frames = 0  # settle langsung
             else:
                 _settle_frames = max(1, int(_settle_ms / 100.0))
         else:
-            # Use system default settle_ms (from config), convert to frames
+            # Pakai settle_ms default sistem (dari config), konversi ke frame
             _settle_ms = self._default_settle_ms
             if _settle_ms == 0:
                 _settle_frames = 0
@@ -841,17 +842,17 @@ class InspectionSessionService:
             part_ready_settled = True
             settle_remaining_ms = 0.0
         elif _raw_part_ready and presence.get("present", False):
-            # _settle_frames == 0 (immediate settle) falls through here too:
-            # consecutive_part_ready_frames >= 0 is trivially true on the very
-            # first genuinely-ready frame, so it settles with no extra delay —
-            # but it still requires _raw_part_ready this frame. A dedicated
-            # "elif _settle_frames == 0: part_ready_settled = True" branch used
-            # to sit ahead of this one and set settled=True unconditionally,
-            # ignoring _raw_part_ready entirely — with part_ready_settle_ms
-            # defaulting to 0 system-wide, that latched part_ready on literally
-            # the first frame of every session regardless of what the camera
-            # showed (e.g. a covered lens scoring 0.07 against an 0.85
-            # threshold still reported 100% "ready").
+            # _settle_frames == 0 (settle langsung) juga jatuh ke sini:
+            # consecutive_part_ready_frames >= 0 secara trivial benar di frame
+            # ready-sungguhan pertama, jadi settle tanpa delay tambahan —
+            # tapi tetap butuh _raw_part_ready di frame ini. Dulu ada branch
+            # khusus "elif _settle_frames == 0: part_ready_settled = True" yang
+            # duduk sebelum branch ini dan set settled=True tanpa syarat,
+            # mengabaikan _raw_part_ready sama sekali — dengan part_ready_settle_ms
+            # default 0 di seluruh sistem, itu bikin part_ready latch persis di
+            # frame pertama tiap session apa pun yang kamera lihat (mis. lensa
+            # tertutup yang skor 0.07 melawan threshold 0.85 tetap dilaporkan
+            # 100% "ready").
             state.consecutive_part_ready_frames += 1
             part_ready_settled = state.consecutive_part_ready_frames >= _settle_frames
             settle_remaining_ms = (
@@ -864,22 +865,22 @@ class InspectionSessionService:
             settle_remaining_ms = 0.0
             self._reset_clamp_gate(state)
 
-        # ── Add settle metadata to part_ready payload for UI ──
-        # Report the original ms value from template (or derived from frames)
+        # ── Tambahkan metadata settle ke payload part_ready untuk UI ──
+        # Laporkan nilai ms asli dari template (atau turunan dari frame)
         _report_settle_ms = _settle_ms if _settle_ms is not None else _settle_frames * 100.0
         part_ready["part_ready_settled"] = part_ready_settled
         part_ready["part_ready_settle_ms"] = _report_settle_ms
         part_ready["part_ready_settle_remaining_ms"] = round(settle_remaining_ms, 1)
 
-        # ── Timeout tracker: record when part first becomes settled ──
+        # ── Tracker timeout: catat saat part pertama kali jadi settled ──
         if part_ready_settled and state.part_ready_settled_at is None:
             state.part_ready_settled_at = _settle_now
 
         # ------------------------------------------------------------------
-        # Part-Ready Latch Logic
-        # Latch protects inference gate from brief part_ready drops during
-        # inspection.  It MUST release when presence is truly gone for
-        # _part_ready_release_ms so that the next cycle can start clean.
+        # Logika Latch Part-Ready
+        # Latch melindungi gate inference dari drop part_ready sesaat selama
+        # inspeksi.  Ini WAJIB release saat presence benar-benar hilang selama
+        # _part_ready_release_ms supaya siklus berikutnya bisa mulai bersih.
         # ------------------------------------------------------------------
         _now_dt = _settle_now
 
@@ -888,7 +889,7 @@ class InspectionSessionService:
             state.part_ready_latched_at = _now_dt
             state.part_ready_unsettled_at = None
 
-        # Release latch when presence is gone long enough
+        # Release latch saat presence hilang cukup lama
         if state.part_ready_latched and not presence.get("present", False):
             if state.part_ready_unsettled_at is None:
                 state.part_ready_unsettled_at = _now_dt
@@ -901,11 +902,11 @@ class InspectionSessionService:
                 state.part_ready_unsettled_at = None
                 self._reset_clamp_gate(state)
         elif state.part_ready_latched and presence.get("present", False):
-            # Presence back — reset unsettled timer
+            # Presence kembali — reset timer unsettled
             state.part_ready_unsettled_at = None
 
-        # Trigger PLC clamp hold on the first frame where part is settled.
-        # But check release/next-part cooldown before re-clamping.
+        # Trigger clamp hold PLC di frame pertama saat part settled.
+        # Tapi cek cooldown release/next-part dulu sebelum re-clamp.
         _cooldown_until = float(getattr(state, "manual_release_cooldown_until", 0.0))
         _now_s = time.time()
         if part_ready_settled and not state.plc_part_ready_triggered:
@@ -935,15 +936,15 @@ class InspectionSessionService:
             now_s=_now_s,
         )
 
-        # effective_part_ready gate for downstream logic / UI.
-        # When latch is active, we report effective_part_ready=True even if raw
-        # briefly dropped, so sticker inference is not blocked by noise.
+        # Gate effective_part_ready untuk logika downstream / UI.
+        # Saat latch aktif, kita laporkan effective_part_ready=True walau raw
+        # sempat drop, supaya sticker inference tidak terblokir noise.
         _latch_ready = state.part_ready_latched and part_ready_settled
         if _raw_part_ready and part_ready_settled:
             effective_part_ready_val = True
             _effective_block_reason = None
         elif _latch_ready:
-            # Latched + settled but raw briefly down — still allow inference
+            # Latched + settled tapi raw sempat down — tetap izinkan inference
             effective_part_ready_val = True
             _effective_block_reason = None
         elif _raw_part_ready and not part_ready_settled:
@@ -956,7 +957,7 @@ class InspectionSessionService:
             effective_part_ready_val = False
             _effective_block_reason = "no_part"
 
-        # Build effective_part_ready dict for backward compatibility
+        # Bangun dict effective_part_ready untuk backward compatibility
         if effective_part_ready_val:
             effective_part_ready = {**part_ready, "part_ready": True}
         else:
@@ -967,7 +968,7 @@ class InspectionSessionService:
                 "status": _effective_block_reason or "part_not_ready",
             }
 
-        # ── Build inference_gate top-level response ──
+        # ── Bangun response top-level inference_gate ──
         _can_infer = (
             effective_part_ready_val
             and clamp_ready_for_inference
@@ -993,7 +994,7 @@ class InspectionSessionService:
             "block_reason": _gate_block_reason,
         }
 
-        # Augment part_ready dict with latch + gate info for UI
+        # Tambahkan info latch + gate ke dict part_ready untuk UI
         part_ready["effective_part_ready"] = effective_part_ready_val
         part_ready["part_ready_latched"] = state.part_ready_latched
         part_ready["latch_status"] = (
@@ -1002,8 +1003,8 @@ class InspectionSessionService:
             else "inactive"
         )
 
-        # Effective presence for operator state machine: use raw presence.
-        # Latch only protects the inference gate, not removal detection.
+        # Presence efektif untuk operator state machine: pakai presence raw.
+        # Latch cuma melindungi gate inference, bukan deteksi removal.
         _effective_present = bool(presence.get("present", False))
         operator_state_decision = self._operator_state_machine.update(
             state,
@@ -1049,12 +1050,12 @@ class InspectionSessionService:
         inference_ms = 0.0
         stage_timings: dict[str, Any] = {}
 
-        # ── Async background inference (frame skip + TTL cache) ──
-        # Submit inference every 3rd frame when not busy.
-        # Use cached result if fresh (<500ms), otherwise compose without bbox.
+        # ── Inference background async (frame skip + cache TTL) ──
+        # Submit inference tiap frame ke-3 saat tidak sibuk.
+        # Pakai hasil cache kalau masih fresh (<500ms), kalau tidak compose tanpa bbox.
         if _effective_pr_ready:
             state.inference_frame_counter += 1
-            # Inference timeout guard: reset stuck busy flag
+            # Guard timeout inference: reset flag busy yang macet
             if (
                 state.inference_thread_busy
                 and state.inference_submit_at > 0
@@ -1095,7 +1096,7 @@ class InspectionSessionService:
                     logger.warning("[inference] submit failed: %s", exc)
                     state.inference_thread_busy = False
 
-            # Use cached result if fresh enough
+            # Pakai hasil cache kalau masih cukup fresh
             _cache_ttl_s = state.inference_cache_ttl_ms / 1000.0
             _age = monotonic() - state.inference_result_ts
             if state.inference_result_cache is not None and _age <= _cache_ttl_s:
@@ -1110,7 +1111,7 @@ class InspectionSessionService:
                         continue
                 inference_payload = _cached
             else:
-                # Stale or no cache — compose without bbox
+                # Basi atau tidak ada cache — compose tanpa bbox
                 inference_payload = {
                     "backend": "async_cache",
                     "model_path": state.template.vision.model_path,
@@ -1148,7 +1149,7 @@ class InspectionSessionService:
                     "gpu_available": inference_payload.get("gpu_available"),
                 }
             )
-            # Cache valid inference result for hand-obstruction handling
+            # Cache hasil inference yang valid untuk penanganan hand-obstruction
             _detected_cls = sticker_detection.get("detected_class")
             if _detected_cls and not sticker_detection.get("skipped", False):
                 state.last_valid_inference = {
@@ -1160,8 +1161,8 @@ class InspectionSessionService:
                 }
                 state.last_valid_inference_ts = monotonic()
         else:
-            # Part not ready — check if we have a fresh cached inference result
-            # (e.g., hand obstructing during commit wait). Use it if within grace window.
+            # Part belum ready — cek apakah ada hasil inference cache yang fresh
+            # (mis. tangan menghalangi saat commit wait). Pakai kalau masih dalam grace window.
             _cache_age_ms = (monotonic() - state.last_valid_inference_ts) * 1000.0 if state.last_valid_inference_ts > 0 else float("inf")
             if state.last_valid_inference is not None and _cache_age_ms < self._inference_cache_grace_ms:
                 logger.debug(
@@ -1222,12 +1223,12 @@ class InspectionSessionService:
 
         event_state_started = time.perf_counter()
 
-        # ── Inspection Policy Commit Gate ──
-        # Determine whether this frame's validation result is allowed to commit.
-        # - ACCEPT: commit only after stability threshold (consecutive frames + elapsed ms).
-        # - REJECT with hard reason (OUT_OF_ANGLE, WRONG_TYPE): commit only after stability threshold.
-        # - REJECT with non-hard reason (NOT_FOUND, gap, low conf, etc.): never auto-commit.
-        #   These stay as pending so the system keeps inferring until ACCEPT (or COMMIT_TIMEOUT).
+        # ── Commit Gate Inspection Policy ──
+        # Tentukan apakah hasil validasi frame ini boleh commit.
+        # - ACCEPT: commit hanya setelah threshold stabilitas (frame berturut-turut + ms berlalu).
+        # - REJECT dengan alasan hard (OUT_OF_ANGLE, WRONG_TYPE): commit hanya setelah threshold stabilitas.
+        # - REJECT dengan alasan non-hard (NOT_FOUND, gap, low conf, dll.): tidak pernah auto-commit.
+        #   Ini tetap pending supaya sistem terus infer sampai ACCEPT (atau COMMIT_TIMEOUT).
         _now_policy = datetime.now(UTC)
         _decision = str(validation.get("decision") or "").strip().upper()
         _reason = str(validation.get("reject_reason_code") or "").strip()
@@ -1235,7 +1236,7 @@ class InspectionSessionService:
         _expected = str(validation.get("expected_class") or "").strip()
         _policy_key = f"{_decision}|{_reason}|{_detected}|{_expected}"
 
-        _hard_reject_reasons = self._hard_reject_reasons  # set from config
+        _hard_reject_reasons = self._hard_reject_reasons  # set dari config
         _is_accept = _decision == DecisionCode.ACCEPT.value
         _is_hard_reject = (
             _decision == DecisionCode.REJECT.value
@@ -1246,10 +1247,10 @@ class InspectionSessionService:
             and _reason not in _hard_reject_reasons
         )
 
-        # Track stability
+        # Lacak stabilitas
         _was_accept = state.last_policy_key.split("|")[0] == "ACCEPT"
 
-        # Start holdover window when transitioning ACCEPT → non-ACCEPT
+        # Mulai window holdover saat transisi ACCEPT → non-ACCEPT
         if _was_accept and not _is_accept and self._accept_holdover_ms > 0:
             if state.policy_holdover_expires_at is None:
                 state.policy_holdover_expires_at = _now_policy + timedelta(
@@ -1262,26 +1263,26 @@ class InspectionSessionService:
             and not _is_accept
         )
 
-        # Hard reject must always cancel holdover — otherwise the holdover
-        # window would mask a genuine WRONG_TYPE and let it credit accept
-        # counters (false-accept risk).
+        # Hard reject harus selalu membatalkan holdover — kalau tidak, window
+        # holdover akan menutupi WRONG_TYPE sungguhan dan membiarkannya ikut
+        # menghitung counter accept (risiko false-accept).
         if _is_hard_reject and _in_holdover:
             state.policy_holdover_expires_at = None
             _in_holdover = False
 
         _effective_is_accept = _is_accept or _in_holdover
-        if _is_accept:                           # real detection came back
-            state.policy_holdover_expires_at = None  # cancel holdover on re-detection
+        if _is_accept:                           # deteksi sungguhan muncul kembali
+            state.policy_holdover_expires_at = None  # batalkan holdover saat terdeteksi lagi
 
         if _is_non_hard_reject:
-            # Non-hard reject is pure noise — do NOT touch any stability counters.
-            # We must not increment policy_stable_frames and must not reset
-            # last_policy_key (would break an existing accept streak).
+            # Non-hard reject itu murni noise — JANGAN sentuh counter stabilitas apa pun.
+            # Jangan increment policy_stable_frames dan jangan reset
+            # last_policy_key (akan memutus streak accept yang sedang berjalan).
             pass
         elif _policy_key == state.last_policy_key:
             state.policy_stable_frames += 1
         elif _in_holdover:
-            # During holdover: don't reset counters, treat gap as noise
+            # Selama holdover: jangan reset counter, anggap gap sebagai noise
             state.policy_stable_frames += 1
         else:
             state.last_policy_key = _policy_key
@@ -1289,35 +1290,35 @@ class InspectionSessionService:
             state.policy_stable_started_at = _now_policy
             state.policy_holdover_expires_at = None
 
-        # ── Inference-generation-based accept gate ──
-        # Only count a frame as a "new accept reading" when the underlying
-        # inference result has actually changed (generation counter advanced).
-        # This prevents the same cached result from being counted as multiple
-        # stable frames on slow PCs where inference takes >500ms.
+        # ── Gate accept berbasis generation inference ──
+        # Cuma hitung satu frame sebagai "pembacaan accept baru" kalau hasil
+        # inference di baliknya benar-benar berubah (counter generation maju).
+        # Ini mencegah hasil cache yang sama dihitung sebagai beberapa frame
+        # stabil di PC lambat yang inference-nya makan waktu >500ms.
         if self._update_accept_generation_count(
             state,
             effective_is_accept=_effective_is_accept,
             is_non_hard_reject=_is_non_hard_reject,
             now_s=time.time(),
         ):
-            # Streak restarted after a non-accept spell longer than the holdover:
-            # the policy stability clock restarts with it.
+            # Streak di-restart setelah jeda non-accept lebih lama dari holdover:
+            # jam stabilitas policy ikut restart bersamanya.
             state.policy_stable_frames = 1
             state.policy_stable_started_at = _now_policy
 
-        # ── Cycle-level grace timer ──
-        # Tracks the first moment ACCEPT was seen in this clamping cycle.
-        # Unlike policy_stable_started_at, this does NOT reset when holdover expires —
-        # it persists across all detection gaps until the cycle resets.
+        # ── Timer grace level-siklus ──
+        # Melacak momen pertama ACCEPT terlihat di siklus clamping ini.
+        # Beda dari policy_stable_started_at, ini TIDAK reset saat holdover habis —
+        # bertahan lintas semua gap deteksi sampai siklusnya reset.
         if _effective_is_accept:
             if state.accept_cycle_started_at is None:
                 state.accept_cycle_started_at = _now_policy
         elif _is_non_hard_reject:
-            # Non-hard reject is pure noise — do NOT reset cycle timer.
-            # The grace period must keep running from the last real ACCEPT.
+            # Non-hard reject itu murni noise — JANGAN reset timer siklus.
+            # Grace period harus tetap jalan dari ACCEPT sungguhan terakhir.
             pass
         elif not _is_accept and not _in_holdover:
-            # True non-accept (holdover fully expired) — reset cycle timer
+            # Non-accept sungguhan (holdover sudah benar-benar habis) — reset timer siklus
             state.accept_cycle_started_at = None
 
         _accept_cycle_elapsed_ms = 0.0
@@ -1332,7 +1333,7 @@ class InspectionSessionService:
                 (_now_policy - state.policy_stable_started_at).total_seconds() * 1000.0
             )
 
-        # Determine commit_allowed with grace period + stability
+        # Tentukan commit_allowed dengan grace period + stabilitas
 
         _commit_allowed = False
         _plc_fault = False
@@ -1340,10 +1341,10 @@ class InspectionSessionService:
         _pending_reason = ""
 
         if _effective_is_accept:
-            # Accept: commit only after grace period + stability
-            # Both policy_stable_frames AND inference_accept_count must meet thresholds.
-            # inference_accept_count only increments when a NEW inference result arrives,
-            # so repeated reads of the same cached result don't count as extra stable frames.
+            # Accept: commit hanya setelah grace period + stabilitas
+            # policy_stable_frames DAN inference_accept_count harus sama-sama memenuhi threshold.
+            # inference_accept_count cuma naik saat ada hasil inference BARU,
+            # jadi pembacaan berulang dari cache yang sama tidak dihitung sebagai frame stabil ekstra.
             _grace_ok = _accept_cycle_elapsed_ms >= self._commit_grace_ms
             _frames_ok = state.policy_stable_frames >= self._accept_stable_frames
             _inference_ok = state.inference_accept_count >= self._accept_stable_frames
@@ -1365,19 +1366,19 @@ class InspectionSessionService:
                 _pending_reason = f"accept_stabilizing({', '.join(_parts)})"
 
         elif _is_hard_reject:
-            # Hard reject (WRONG_TYPE): never auto-commit — wait for the timeout reject instead.
+            # Hard reject (WRONG_TYPE): tidak pernah auto-commit — tunggu timeout reject saja.
             _policy_action = "pending"
             _pending_reason = "sticker_hard_reject_awaiting_timeout"
 
         else:
-            # Non-hard reject (NOT_FOUND, gap, low conf, etc.) — never auto-commit.
-            # Keep inferring until ACCEPT (or COMMIT_TIMEOUT safety-net below).
+            # Non-hard reject (NOT_FOUND, gap, low conf, dll.) — tidak pernah auto-commit.
+            # Terus infer sampai ACCEPT (atau safety-net COMMIT_TIMEOUT di bawah).
             _policy_action = "pending"
             _pending_reason = f"non_hard_reject:{_reason}"
 
         # ── Timeout reject ──
         # Jika part sudah settled tapi tidak ada accept-commit dalam waktu reject_timeout_ms
-        # Hard rejects (WRONG_TYPE) are also allowed to commit via the timeout path.
+        # Hard reject (WRONG_TYPE) juga boleh commit lewat jalur timeout.
         _allow_timeout_for_hard_reject = _is_hard_reject
         if (
             not _commit_allowed
@@ -1395,9 +1396,9 @@ class InspectionSessionService:
                 validation["decision"] = DecisionCode.REJECT.value
                 validation["reject_reason_code"] = RejectReasonCode.COMMIT_TIMEOUT.value
 
-        # ── Item 1: Pre-commit PLC health gate ──
-        # If PLC is enabled (not dry-run) and worker exists, require healthy link before commit.
-        # This prevents persisting ACCEPT/REJECT while no relay can fire.
+        # ── Item 1: Gate kesehatan PLC pre-commit ──
+        # Kalau PLC aktif (bukan dry-run) dan worker ada, wajib link sehat sebelum commit.
+        # Ini mencegah persist ACCEPT/REJECT saat tidak ada relay yang bisa fire.
         if (
             _commit_allowed
             and self._plc_worker is not None
@@ -1409,16 +1410,16 @@ class InspectionSessionService:
                 _policy_action = "plc_fault"
                 _pending_reason = "plc_unhealthy_commit_blocked"
 
-        # ── Item 2: below_min_confidence gate from part_ready ──
-        # If part_ready reported that match_ratio is below min_match_ratio,
-        # block commit even if inference says ACCEPT. This prevents committing
-        # results when the part_ready confidence is too low.
+        # ── Item 2: gate below_min_confidence dari part_ready ──
+        # Kalau part_ready melaporkan match_ratio di bawah min_match_ratio,
+        # blokir commit walau inference bilang ACCEPT. Ini mencegah commit
+        # hasil saat confidence part_ready terlalu rendah.
         if _commit_allowed and part_ready.get("below_min_confidence"):
             _commit_allowed = False
             _policy_action = "low_confidence_pending"
             _pending_reason = "part_ready_below_min_confidence"
 
-        # Build inspection_policy response
+        # Bangun response inspection_policy
         inspection_policy = {
             "action": _policy_action,
             "commit_allowed": _commit_allowed,
@@ -1429,7 +1430,7 @@ class InspectionSessionService:
             "stable_frames": state.policy_stable_frames,
         }
 
-        # Reset stability counters on commit
+        # Reset counter stabilitas saat commit
         if _commit_allowed:
             state.policy_stable_frames = 0
             state.last_policy_key = ""
@@ -1437,8 +1438,8 @@ class InspectionSessionService:
             state.policy_holdover_expires_at = None
             state.accept_cycle_started_at = None
 
-        # Event state advance — policy gate is the sole commit authority.
-        # Event machine provides dedup (anti-double-count) + event_id.
+        # Advance event state — gate policy adalah satu-satunya otoritas commit.
+        # Event machine menyediakan dedup (anti-double-count) + event_id.
         event_state, event_id, count_committed = self._advance_event_state(
             state=state,
             validation=validation,
@@ -1448,8 +1449,8 @@ class InspectionSessionService:
             commit_allowed=_commit_allowed,
         )
 
-        # count_committed is already authoritative: only True when policy allows
-        # AND event is fresh (not already committed / COOLDOWN).
+        # count_committed sudah otoritatif: cuma True saat policy mengizinkan
+        # DAN event masih fresh (belum di-commit / COOLDOWN).
 
         timings["event_state_ms"] = _elapsed_ms(event_state_started)
 
@@ -1461,11 +1462,11 @@ class InspectionSessionService:
                     float(getattr(state, "manual_release_cooldown_until", 0.0) or 0.0),
                     time.time() + (self._phase_next_part_delay_ms / 1000.0),
                 )
-            # Full cycle reset — deterministic, does not depend on presence gap
+            # Reset siklus penuh — deterministik, tidak bergantung pada gap presence
             state.part_ready_latched = False
             state.part_ready_latched_at = None
             state.part_ready_unsettled_at = None
-            state.part_ready_settled_at = None  # ← reset timeout timer for new cycle
+            state.part_ready_settled_at = None  # ← reset timer timeout untuk siklus baru
             state.consecutive_part_ready_frames = 0
             state.plc_part_ready_triggered = False
             state.current_event_committed = False
@@ -1481,11 +1482,11 @@ class InspectionSessionService:
             state.inference_accept_count = 0
             state.inference_last_counted_generation = -1
             state.inference_accept_first_ts = 0.0
-            # Reset ratio history — prevent stale ratios from contaminating next cycle
+            # Reset ratio history — mencegah ratio basi mengontaminasi siklus berikutnya
             state.part_ready_ratio_history.clear()
             state.part_ready_ema_ratio = -1.0
-            # Notify PLC worker of inspection decision
-            # Only commit to PLC for accept or hard reject (not non-hard reject)
+            # Beri tahu PLC worker soal decision inspeksi
+            # Cuma commit ke PLC untuk accept atau hard reject (bukan non-hard reject)
             decision = validation.get("decision", "")
             if (
                 self._plc_worker is not None
@@ -1497,9 +1498,9 @@ class InspectionSessionService:
                 except Exception as exc:  # noqa: BLE001
                     logger.error("[inspection] plc_worker.notify_decision failed: %s", exc)
 
-            # ── COMMIT_TIMEOUT: PLC fires, but NO DB write ──
-            # Timeout reject triggers NG buzzer + solenoid hold (via PLC),
-            # but no inspection row is written — cycle resets locally.
+            # ── COMMIT_TIMEOUT: PLC fire, tapi TIDAK ADA tulis DB ──
+            # Timeout reject men-trigger buzzer NG + solenoid hold (lewat PLC),
+            # tapi tidak ada baris inspeksi yang ditulis — siklus reset lokal.
             _is_timeout_reject = (
                 _reason == RejectReasonCode.COMMIT_TIMEOUT.value
                 and validation.get("decision") == DecisionCode.REJECT.value
@@ -1507,9 +1508,9 @@ class InspectionSessionService:
             if _is_timeout_reject:
                 db_write = {"written": False, "reason": "timeout_reject_no_db"}
             else:
-                # ── PLC commit interlock ──────────────────────────────────────
-                # If PLC is enabled (not dry-run) and link is unhealthy, block
-                # DB persist to prevent ACCEPT/REJECT rows with no relay action.
+                # ── Interlock commit PLC ──────────────────────────────────────
+                # Kalau PLC aktif (bukan dry-run) dan link-nya tidak sehat, blokir
+                # persist DB untuk mencegah baris ACCEPT/REJECT tanpa aksi relay.
                 if (
                     self._plc_worker is not None
                     and not self._plc_worker._dry_run
@@ -1535,7 +1536,7 @@ class InspectionSessionService:
                     sticker_detection=sticker_detection,
                     event_id=event_id,
                 )
-            # Item 1: register pending actuation for ACK/NACK reconciliation
+            # Item 1: daftarkan aktuasi pending untuk rekonsiliasi ACK/NACK
             if db_write.get("written") and event_id:
                 _result_id = db_write.get("result_id")
                 self._pending_actuations[event_id] = {
@@ -1557,9 +1558,9 @@ class InspectionSessionService:
         timings["persistence_ms"] = _elapsed_ms(persistence_started)
 
         normalized_response_mode = str(response_mode or "").strip().lower()
-        # "stream": skip overlay compose and encode entirely — client renders locally.
-        # "compact"/"minimal"/"overlay": encode overlay but skip heavy preview images.
-        # (default) "full": encode everything.
+        # "stream": lewati compose overlay dan encode sepenuhnya — client render lokal.
+        # "compact"/"minimal"/"overlay": encode overlay tapi lewati gambar preview berat.
+        # (default) "full": encode semuanya.
         stream_response = normalized_response_mode in {"stream"}
         compact_response = stream_response or normalized_response_mode in {"compact", "minimal", "overlay"}
 
@@ -1639,7 +1640,7 @@ class InspectionSessionService:
             state = self._sessions.get(session_id)
         if not state:
             raise ValueError("Inspection session not found.")
-        # Idle timeout: auto-end session if no frames received for too long
+        # Idle timeout: auto-akhiri session kalau tidak ada frame masuk terlalu lama
         if (hasattr(self, '_idle_timeout_s') and self._idle_timeout_s > 0):
             last = float(getattr(state, 'last_activity_at', 0.0) or 0.0)
             if last > 0 and (time.time() - last) > self._idle_timeout_s:
@@ -1648,7 +1649,7 @@ class InspectionSessionService:
                     session_id, time.time() - last, self._idle_timeout_s,
                 )
                 state.status = SessionStatus.STOPPED
-                # Shutdown background inference executor to prevent thread leak
+                # Matikan executor inference background untuk mencegah thread leak
                 if state._inference_executor is not None:
                     try:
                         state._inference_executor.shutdown(wait=False)
@@ -1724,10 +1725,10 @@ class InspectionSessionService:
     def _expand_roi_for_gap_search(
         self, raw_frame, base_roi: RoiGeometry, override: dict[str, Any], margin: float
     ):
-        """Crop ``raw_frame`` to ``part_ready_roi`` grown by ``margin`` (fraction
-        of the ROI's own w/h, each side), clamped to frame bounds. Used only by
-        gap_template_match to give cv2.matchTemplate room to search instead of
-        comparing at a single fixed offset. Returns None on a degenerate crop."""
+        """Crop ``raw_frame`` ke ``part_ready_roi`` yang diperbesar ``margin`` (fraksi
+        dari w/h ROI itu sendiri, tiap sisi), di-clamp ke batas frame. Cuma dipakai
+        gap_template_match supaya cv2.matchTemplate punya ruang untuk mencari, bukan
+        membandingkan di satu offset tetap. Return None kalau crop-nya degenerate."""
         roi = self._merged_roi_payload(base_roi, override)
         height, width = raw_frame.shape[:2]
         roi_w_frac = float(roi.get("w", 1.0))
@@ -1746,7 +1747,7 @@ class InspectionSessionService:
     def _on_inference_done(
         self, future: concurrent.futures.Future, state: SessionState
     ) -> None:
-        """Callback when async inference completes. Thread-safe write to cache."""
+        """Callback saat inference async selesai. Tulis ke cache thread-safe."""
         try:
             result = future.result()
             state.inference_result_cache = result
@@ -1760,7 +1761,7 @@ class InspectionSessionService:
     def _run_sticker_inference_sync(
         self, frame: np.ndarray, state: SessionState
     ) -> dict:
-        """Wrapper for background thread — calls sync inference and returns serializable dict."""
+        """Wrapper untuk thread background — panggil inference sync dan return dict serializable."""
         try:
             return self._run_sticker_inference(frame, state)
         except Exception as exc:
@@ -1851,7 +1852,7 @@ class InspectionSessionService:
         elif method == "gap_template_match":
             result = self._evaluate_part_ready_gap(frame, state, config, raw_frame=raw_frame)
         else:
-            # Item 2: fail-closed on unsupported method — don't silently substitute gap
+            # Item 2: fail-closed untuk method yang tidak didukung — jangan diam-diam ganti ke gap
             logger.error(
                 "[inspection] unsupported part_ready method '%s' for template %s — failing closed",
                 method, state.template.id,
@@ -1869,23 +1870,23 @@ class InspectionSessionService:
                 "gap_score": None,
             }
 
-        # Universal min_match_ratio gate: apply floor confidence to ALL methods
-        # If match_ratio is below min_match_ratio, mark it but DON'T change part_ready
-        # (part_ready controls whether inference runs; we still want inference to run
-        # so the operator sees results, but commit gate should check this flag)
+        # Gate min_match_ratio universal: terapkan floor confidence ke SEMUA method
+        # Kalau match_ratio di bawah min_match_ratio, tandai tapi JANGAN ubah part_ready
+        # (part_ready mengontrol apakah inference jalan; kita tetap mau inference jalan
+        # supaya operator melihat hasilnya, tapi commit gate harus cek flag ini)
         _min_conf = float(getattr(config, "min_match_ratio", 0.5) or 0.5)
         _match_ratio = result.get("match_ratio")
         if _match_ratio is not None and result.get("part_ready", False) and _match_ratio < _min_conf:
             result["below_min_confidence"] = True
-            # Override status to signal low confidence but keep part_ready=True
-            # so inference can still run. The commit gate will check this flag.
+            # Override status untuk menandai confidence rendah tapi part_ready tetap True
+            # supaya inference tetap bisa jalan. Commit gate akan cek flag ini.
             result["part_ready_confidence"] = _match_ratio
             result["status"] = "below_min_confidence"
 
         return result
 
     def _evaluate_part_ready_gap(self, frame, state: SessionState, config, raw_frame=None) -> dict[str, Any]:
-        """Gap detection via template matching against reference patch."""
+        """Deteksi gap lewat template matching terhadap patch referensi."""
         from backend.app.services.gap_detector import load_ref_patch, match_gap, get_ref_path
 
         ref_path = getattr(config, "gap_ref_path", None)
@@ -1894,7 +1895,7 @@ class InspectionSessionService:
         canny_high = getattr(config, "canny_high", None)
         margin = max(0.0, float(getattr(config, "gap_search_margin", 0.0) or 0.0))
 
-        # Load reference patch (cached in state if available)
+        # Muat patch referensi (di-cache di state kalau tersedia)
         cache_key = f"_gap_ref_{state.template.id}_{ref_path}"
         ref_patch = state.gap_ref_cache.get(cache_key)
         if ref_patch is None:
@@ -1955,17 +1956,17 @@ class InspectionSessionService:
         }
 
     def _evaluate_part_ready_mean_std(self, frame, state: SessionState, config) -> dict[str, Any]:
-        """"Mean + Std threshold classification.
+        """"Klasifikasi threshold Mean + Std.
 
-        Classifies the ROI into empty / part_normal / sticker based on
-        grayscale mean and standard deviation, with EMA smoothing.
+        Mengklasifikasikan ROI ke empty / part_normal / sticker berdasarkan
+        mean dan standard deviation grayscale, dengan EMA smoothing.
         """
         from backend.app.services.part_ready_detector import evaluate_mean_std_threshold
 
         evaluation = evaluate_mean_std_threshold(frame, config)
 
-        # EMA smoothing on the classification confidence (match_ratio)
-        # Use sentinel -1.0 to distinguish "not yet initialized" from valid 0.0
+        # EMA smoothing pada confidence klasifikasi (match_ratio)
+        # Pakai sentinel -1.0 untuk membedakan "belum diinisialisasi" dari 0.0 yang valid
         _ema_alpha = max(0.0, min(1.0, float(getattr(config, "ema_alpha", 0.3) or 0.3)))
         raw_ratio = float(evaluation["match_ratio"])
         if state.part_ready_ema_ratio < 0.0:
@@ -1976,12 +1977,12 @@ class InspectionSessionService:
             )
         smoothed_ratio = state.part_ready_ema_ratio
 
-        # Decision uses the same smoothed ratio as displayed
-        # (raw_part_ready from classifier is kept as reference, but effective decision
-        # for the gateway is based on smoothed confidence)
+        # Decision pakai ratio smoothed yang sama seperti yang ditampilkan
+        # (raw_part_ready dari classifier disimpan sebagai referensi, tapi decision
+        # efektif untuk gateway berdasarkan confidence yang sudah di-smooth)
         _raw_ready = bool(evaluation["part_ready"])
-        # Only consider ready if the smoothed match_ratio is above the method threshold
-        # AND the raw classifier said ready (structural classification still required)
+        # Cuma anggap ready kalau match_ratio smoothed di atas threshold method
+        # DAN classifier raw bilang ready (klasifikasi struktural tetap wajib)
         ready = _raw_ready
         evaluation.update({
             "part_ready": ready,
@@ -2096,7 +2097,7 @@ class InspectionSessionService:
                 "part_name": sticker.part_name,
                 "line_id": line_id,
                 "station_id": state.station_id,
-                # Contract: data1 = part_ready confidence, data2 = sticker confidence
+                # Kontrak: data1 = confidence part_ready, data2 = confidence sticker
                 "data1": part_ready_payload.get("part_ready_confidence"),
                 "data2": None,
                 "targets": [],
@@ -2127,15 +2128,15 @@ class InspectionSessionService:
         matching_candidate_count = sum(1 for item in candidates if item.get("match_expected"))
         if selected_candidate is None:
             return {
-                # Detections exist but none usable → not a final result.
-                # Keep inferring (non-hard reject → pending) instead of ACCEPT.
+                # Ada deteksi tapi tidak ada yang bisa dipakai → bukan hasil final.
+                # Terus infer (non-hard reject → pending) alih-alih ACCEPT.
                 "decision": DecisionCode.REJECT.value,
                 "decision_code": DecisionCode.REJECT.value,
                 "reject_reason_code": RejectReasonCode.NOT_FOUND.value,
                 "part_name": sticker.part_name,
                 "line_id": line_id,
                 "station_id": state.station_id,
-                # Contract: data1 = part_ready confidence, data2 = sticker confidence
+                # Kontrak: data1 = confidence part_ready, data2 = confidence sticker
                 "data1": part_ready_payload.get("part_ready_confidence"),
                 "data2": None,
                 "targets": [],
@@ -2194,7 +2195,7 @@ class InspectionSessionService:
             "part_name": sticker.part_name,
             "line_id": line_id,
             "station_id": state.station_id,
-            # Contract: data1 = part_ready confidence, data2 = sticker confidence
+            # Kontrak: data1 = confidence part_ready, data2 = confidence sticker
             "data1": part_ready_payload.get("part_ready_confidence"),
             "data2": selected_candidate.get("confidence"),
             "targets": [target],
@@ -2244,12 +2245,12 @@ class InspectionSessionService:
             f"{validation.get('part_name') or '-'}"
         )
         if _event_key == state.current_event_key and state.current_event_id is not None:
-            # Same event continuing
+            # Event yang sama masih berlanjut
             if state.current_event_committed:
                 return InspectionEventState.COOLDOWN.value, state.current_event_id, False
             state.current_event_stable_frames += 1
         else:
-            # Outcome changed (e.g. REJECT → ACCEPT after config fix) → new event.
+            # Outcome berubah (mis. REJECT → ACCEPT setelah config diperbaiki) → event baru.
             state.event_sequence += 1
             state.current_event_id = f"evt-{state.event_sequence:05d}"
             state.current_event_key = _event_key
@@ -2260,12 +2261,12 @@ class InspectionSessionService:
         if not part_ready_payload.get("part_ready", False):
             return InspectionEventState.PART_DETECTED.value, state.current_event_id, False
 
-        # Commit authority: policy gate is the sole timing authority.
-        # commit_allowed=True means grace + stable_frames + inference count all passed.
+        # Otoritas commit: gate policy adalah satu-satunya otoritas timing.
+        # commit_allowed=True berarti grace + stable_frames + inference count semuanya lolos.
         commit_ready = commit_allowed
 
         if commit_ready:
-            # Check consecutive reject threshold
+            # Cek threshold reject berturut-turut
             decision = str(validation.get("decision") or "").strip().upper()
             reject_reason = str(validation.get("reject_reason_code") or "").strip().upper()
             is_timeout_reject = reject_reason == RejectReasonCode.COMMIT_TIMEOUT.value
@@ -2274,21 +2275,21 @@ class InspectionSessionService:
                 and self._max_consecutive_rejects > 0
                 and not is_timeout_reject
             ):
-                # Increment consecutive reject counter
+                # Increment counter reject berturut-turut
                 state.consecutive_reject_count = int(getattr(state, "consecutive_reject_count", 0)) + 1
                 if state.consecutive_reject_count < self._max_consecutive_rejects:
-                    # Not enough consecutive rejects yet — don't commit, keep inferring
+                    # Reject berturut-turut belum cukup — jangan commit, terus infer
                     logger.info(
                         "[inspection] reject count %d/%d — delaying commit",
                         state.consecutive_reject_count, self._max_consecutive_rejects,
                     )
                     return InspectionEventState.DECISION_PENDING.value, state.current_event_id, False
                 else:
-                    # Reached threshold — commit reject and reset counter
+                    # Sudah mencapai threshold — commit reject dan reset counter
                     state.consecutive_reject_count = 0
             elif decision == DecisionCode.ACCEPT.value or is_timeout_reject:
-                # Accept and COMMIT_TIMEOUT always commit immediately — no debounce needed.
-                # COMMIT_TIMEOUT is guaranteed valid (part settled for reject_timeout_ms without accept).
+                # Accept dan COMMIT_TIMEOUT selalu commit instan — tidak perlu debounce.
+                # COMMIT_TIMEOUT dijamin valid (part settled selama reject_timeout_ms tanpa accept).
                 state.consecutive_reject_count = 0
 
             state.current_event_committed = True
@@ -2345,7 +2346,7 @@ class InspectionSessionService:
             state.session_total += 1
             state.session_accept += 1
             return
-        # REJECT: tracked in reject counters only, does not increment session_total
+        # REJECT: cuma dilacak di counter reject, tidak menaikkan session_total
         state.session_reject += 1
         reject_reason = str(validation.get("reject_reason_code") or RejectReasonCode.ERROR.value)
         state.session_reject_breakdown.setdefault(reject_reason, 0)
@@ -2543,16 +2544,16 @@ class InspectionSessionService:
 
         if not state.template.persistence.write_to_db:
             return {"written": False, "reason": "disabled"}
-        # Use the event_id parameter (the id of the event actually being
-        # committed right now), NOT state.current_event_id — by the time this
-        # runs, the caller's "full cycle reset" has already set
-        # state.current_event_id back to None for the *next* cycle. Reading
-        # it here collapsed persist_key to the same "event:ACCEPT:OK:<part>"
-        # string for every commit with the same decision/part_name, so only
-        # the first commit in a session ever persisted — every later one hit
-        # the duplicate_event guard below and was silently dropped, even
-        # though the in-memory session counter (which doesn't go through
-        # this dedup) kept incrementing normally.
+        # Pakai parameter event_id (id event yang sedang benar-benar di-commit
+        # sekarang), BUKAN state.current_event_id — pada saat ini berjalan,
+        # "full cycle reset" milik pemanggil sudah men-set state.current_event_id
+        # kembali ke None untuk siklus *berikutnya*. Membaca state.current_event_id
+        # di sini bikin persist_key kolaps jadi string "event:ACCEPT:OK:<part>"
+        # yang sama untuk tiap commit dengan decision/part_name sama, jadi cuma
+        # commit pertama di satu session yang pernah ter-persist — semua yang
+        # berikutnya kena guard duplicate_event di bawah dan diam-diam dibuang, walaupun
+        # counter session in-memory (yang tidak lewat dedup ini) tetap
+        # naik normal.
         persist_key = (
             f"{event_id or 'event'}:"
             f"{validation.get('decision')}:"
@@ -2567,19 +2568,19 @@ class InspectionSessionService:
                 "line_id": validation.get("line_id"),
                 "station_id": validation.get("station_id"),
                 "part_name": validation.get("part_name"),
-                # PartName pushed to SQL comes from the template's own name
-                # ("Preset Name" in Admin -> Templates), not expected_class —
-                # see build_sql_payload() in the mirror repos.
+                # PartName yang di-push ke SQL berasal dari nama template itu
+                # sendiri ("Preset Name" di Admin -> Templates), bukan expected_class —
+                # lihat build_sql_payload() di mirror repos.
                 "template_name": state.template.name,
                 "mp_check": validation.get("mp_check"),
-                # data1/data2 mirror SQL contract: data1=part_ready confidence, data2=sticker confidence
+                # data1/data2 sesuai kontrak SQL: data1=confidence part_ready, data2=confidence sticker
                 "data1": validation.get("data1"),
                 "data2": validation.get("data2"),
                 "decision": validation.get("decision"),
                 "decision_code": validation.get("decision_code"),
                 "reject_reason_code": validation.get("reject_reason_code"),
                 "push_status": "pending",
-                "actuation_status": "pending",  # Item 1: track PLC actuation ACK/NACK
+                "actuation_status": "pending",  # Item 1: lacak ACK/NACK aktuasi PLC
                 "retry_count": 0,
                 "operator_user_id": validation.get("operator_user_id"),
                 "part_ready_status": part_ready.get("status"),

@@ -1,19 +1,19 @@
-"""Authentication backed by the factory's own `operator` table.
+"""Autentikasi berbasis tabel `operator` milik pabrik.
 
-That table (columns: No/MC_ID/No_RFID/Member_ID/StatusMP by default — see
-`QC_SUITE_OPERATOR_*` in core/config.py) is owned by another system (the
-plant MES), not by this app:
+Tabel itu (kolom: No/MC_ID/No_RFID/Member_ID/StatusMP secara default — lihat
+`QC_SUITE_OPERATOR_*` di core/config.py) dimiliki sistem lain (MES pabrik),
+bukan app ini:
 
-- No auto-create / auto-migrate: the table must already exist. If it
-  doesn't, queries fail loudly instead of silently creating a shadow schema.
-- No default-account seeding: accounts are managed in the shared table.
-- MC_ID is plain per-row data, not a query scope: it tells an operator which
-  machine/station they're assigned to (set/edited from the Admin -> Operators
-  form), it does not filter which rows this app can see.
-- There is no password_hash column: the No_RFID value doubles as the login
-  password (typing it, or tapping the physical card, both compare against
-  the same column). There are also no is_active / created_at / updated_at /
-  last_login_at columns, so those concepts are best-effort (see set_active).
+- Tidak ada auto-create / auto-migrate: tabelnya harus sudah ada. Kalau
+  belum ada, query gagal keras alih-alih diam-diam membuat schema bayangan.
+- Tidak ada seeding akun default: akun dikelola di tabel bersama itu.
+- MC_ID cuma data per-baris biasa, bukan query scope: menunjukkan mesin/
+  station tempat operator itu ditugaskan (di-set/diedit dari form Admin ->
+  Operators), tidak memfilter baris mana yang bisa dilihat app ini.
+- Tidak ada kolom password_hash: nilai No_RFID sekaligus jadi password login
+  (mengetiknya, atau tap kartu fisik, keduanya dibandingkan ke kolom yang
+  sama). Juga tidak ada kolom is_active / created_at / updated_at /
+  last_login_at, jadi konsep-konsep itu diusahakan sebaik mungkin (lihat set_active).
 """
 from __future__ import annotations
 
@@ -164,10 +164,10 @@ class PostgresUsersRepository(PostgresRepositoryBase):
             try:
                 with self._connect() as conn:
                     with conn.cursor() as cursor:
-                        # Compute No = MAX(No) + 1 ourselves rather than trusting a DB
-                        # identity/sequence to stay in sync (the operator table can be
-                        # written to by other systems too). If another writer takes the
-                        # same number first, the real PK on No rejects it and we retry.
+                        # Hitung No = MAX(No) + 1 sendiri, tidak percaya identity/sequence
+                        # DB supaya tetap sinkron (tabel operator bisa juga ditulis sistem
+                        # lain). Kalau writer lain ambil angka yang sama duluan, PK asli
+                        # di No akan menolaknya dan kita coba lagi.
                         cursor.execute(
                             f"INSERT INTO {self._table} "
                             f"({self._col_member_id}, {self._col_rfid}, {self._col_status}, "
@@ -183,15 +183,15 @@ class PostgresUsersRepository(PostgresRepositoryBase):
                 row = None
                 continue
         if row is None:
-            raise ValueError("Failed to create user: could not allocate a free No after several attempts.")
+            raise ValueError("Gagal membuat user: tidak berhasil mengalokasikan No yang bebas setelah beberapa percobaan.")
         record = self._public_record(self._row_to_record(row))
         if record is None:
-            raise ValueError("Failed to create user.")
+            raise ValueError("Gagal membuat user.")
         return record
 
     def set_active(self, user_id: int, is_active: bool) -> dict[str, Any]:
-        # No is_active column on the operator table — enabling/disabling
-        # accounts isn't supported on this backend, only add/edit/delete.
+        # Tidak ada kolom is_active di tabel operator — enable/disable akun
+        # tidak didukung di backend ini, cuma add/edit/delete.
         record = self.get_by_id(user_id)
         if record is None:
             raise ValueError("User not found.")

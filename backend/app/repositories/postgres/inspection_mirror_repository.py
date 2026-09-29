@@ -20,25 +20,25 @@ _MEMBER_ID_CODE_PATTERN = re.compile(r"\d{4}")
 
 
 def _mp_check_code(mp_check: Any) -> str | None:
-    """Member_ID is formatted like "ID 9101 PUTRA" — only the 4-digit code
-    in the middle gets pushed to MPCheck, not the full string. Falls back to
-    the raw value when no 4-digit run is found, so a differently-shaped
-    Member_ID still pushes something rather than nothing."""
+    """Member_ID formatnya seperti "ID 9101 PUTRA" — cuma kode 4-digit di
+    tengahnya yang di-push ke MPCheck, bukan string lengkapnya. Fallback ke
+    nilai aslinya kalau tidak ketemu pola 4-digit, supaya Member_ID dengan
+    bentuk berbeda tetap push sesuatu, bukan kosong."""
     text = str(mp_check or "")
     match = _MEMBER_ID_CODE_PATTERN.search(text)
     return match.group(0) if match else (text or None)
 
 
 def _line_last_char(line_id: Any) -> str | None:
-    """identity.line is a line code like "GB3" or "A01" — only its last
-    character is pushed to the Line column."""
+    """identity.line itu kode line seperti "GB3" atau "A01" — cuma karakter
+    terakhirnya yang di-push ke kolom Line."""
     text = str(line_id or "").strip()
     return text[-1] if text else None
 
 
 def _as_percentage(ratio: Any) -> str | None:
-    """Data1/Data2 are stored locally as 0..1 confidence ratios but pushed
-    to SQL as a whole-number percentage string, e.g. 0.9326 -> "93%"."""
+    """Data1/Data2 disimpan lokal sebagai rasio confidence 0..1 tapi di-push
+    ke SQL sebagai string persentase bilangan bulat, mis. 0.9326 -> "93%"."""
     if ratio is None:
         return None
     try:
@@ -48,18 +48,18 @@ def _as_percentage(ratio: Any) -> str | None:
 
 
 class PostgresInspectionMirrorRepository(PostgresRepositoryBase):
-    """Pushes inspection results to an external push table owned by the
-    plant MES / reporting system, not this app — table and column names are
-    deployment-specific (`QC_SUITE_INSPECTION_*` in core/config.py, default
-    `qc_inspection_push`). This repository never creates or alters it."""
+    """Push hasil inspeksi ke tabel push eksternal milik MES pabrik /
+    sistem reporting, bukan app ini — nama tabel dan kolom spesifik per
+    deployment (`QC_SUITE_INSPECTION_*` di core/config.py, default
+    `qc_inspection_push`). Repository ini tidak pernah membuat atau mengubahnya."""
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__(config)
         self._table = _quote_ident(config.inspection_push_table)
         self._col_id = _quote_ident(config.inspection_push_col_id)
-        # Each logical field may map to more than one physical column (a
-        # target table that duplicates the same value across redundant
-        # columns) — every column in the list gets the same value on insert.
+        # Tiap field logis boleh dipetakan ke lebih dari satu kolom fisik
+        # (tabel tujuan yang menduplikasi nilai yang sama di beberapa
+        # kolom) — tiap kolom di list dapat nilai yang sama saat insert.
         self._field_columns: list[tuple[str, list[str]]] = [
             ("PartName", [_quote_ident(c) for c in config.inspection_push_col_part_name]),
             ("DateCheckMC", [_quote_ident(c) for c in config.inspection_push_col_date_check_mc]),
@@ -72,9 +72,9 @@ class PostgresInspectionMirrorRepository(PostgresRepositoryBase):
     @staticmethod
     def build_sql_payload(payload: dict[str, Any]) -> dict[str, Any]:
         return {
-            # The template's own name ("Preset Name" in Admin -> Templates),
-            # not the ML expected_class label — admin/expected_class both
-            # fall back only if the template name is somehow missing.
+            # Nama template itu sendiri ("Preset Name" di Admin -> Templates),
+            # bukan label ML expected_class — admin/expected_class cuma
+            # fallback kalau nama template entah kenapa kosong.
             "PartName": payload.get("template_name") or payload.get("expected_class") or payload.get("part_name"),
             "DateCheckMC": payload.get("inspected_at") or _utcnow(),
             "MPCheck": _mp_check_code(payload.get("mp_check")),
@@ -84,10 +84,10 @@ class PostgresInspectionMirrorRepository(PostgresRepositoryBase):
         }
 
     def _build_insert_plan(self, record: dict[str, Any]) -> tuple[list[str], list[Any]]:
-        """Flatten `self._field_columns` against `record` into parallel
-        (quoted column, value) lists — duplicating a field's value into every
-        physical column configured for it. Kept separate from `create_result`
-        so it's unit-testable without a live DB connection."""
+        """Ratakan `self._field_columns` terhadap `record` jadi list paralel
+        (kolom ter-quote, nilai) — menduplikasi nilai satu field ke tiap
+        kolom fisik yang dikonfigurasi untuknya. Dipisah dari `create_result`
+        supaya bisa di-unit-test tanpa koneksi DB nyata."""
         columns: list[str] = []
         values: list[Any] = []
         for logical_key, quoted_columns in self._field_columns:

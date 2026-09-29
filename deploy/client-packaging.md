@@ -1,12 +1,12 @@
 # Client Packaging
 
-## Development Run
+## Menjalankan untuk Development
 
 ```powershell
 py -3.11 d:\ProjectMagang\aiflow\aski-flow\qc-suite-python\scripts\run_client.py
 ```
 
-## Onefile Packaging Example
+## Contoh Packaging Onefile
 
 ```powershell
 py -3.11 -m pip install pyinstaller

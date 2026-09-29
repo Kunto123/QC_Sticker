@@ -22,7 +22,7 @@ class HybridInspectionResultsRepository:
 
     def _apply_mirror_result(self, record: dict[str, Any]) -> dict[str, Any]:
         if self._sql_mirror_repo is None:
-            raise ValueError("SQL mirror push is not configured.")
+            raise ValueError("Push mirror SQL belum dikonfigurasi.")
 
         attempt_at = self._utcnow_iso()
         try:
@@ -72,13 +72,13 @@ class HybridInspectionResultsRepository:
         push_status = str(record.get("push_status") or "").strip().lower()
         if push_status not in self.RETRYABLE_PUSH_STATUSES:
             raise ValueError(
-                f"Inspection result #{result_id} cannot be retried from push_status `{push_status or '-'}`."
+                f"Hasil inspeksi #{result_id} tidak bisa di-retry dari push_status `{push_status or '-'}`."
             )
         return self._apply_mirror_result(record)
 
     def retry_failed(self, *, result_ids: list[int] | None = None, limit: int = 100) -> list[dict[str, Any]]:
         if self._sql_mirror_repo is None:
-            raise ValueError("SQL mirror push is not configured.")
+            raise ValueError("Push mirror SQL belum dikonfigurasi.")
 
         records: list[dict[str, Any]] = []
         seen_ids: set[int] = set()
@@ -165,7 +165,7 @@ class HybridInspectionResultsRepository:
         try:
             delete_mirror(int(mirror_id))
         except Exception:  # noqa: BLE001
-            # Mirror cleanup is best-effort; local source of truth is already deleted.
+            # Pembersihan mirror sifatnya best-effort; source of truth lokal sudah terhapus.
             pass
         return deleted
 

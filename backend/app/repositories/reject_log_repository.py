@@ -14,7 +14,7 @@ def _utcnow_iso() -> str:
 
 
 class RejectLogRepository:
-    """Append-only reject log backed by a local JSON lines file."""
+    """Log reject append-only yang disimpan di file JSON lines lokal."""
 
     _FILENAME = "reject_log.jsonl"
 

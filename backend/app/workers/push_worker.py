@@ -15,22 +15,22 @@ logger = logging.getLogger(__name__)
 _MAX_RETRY_COUNT = 5
 _DEAD_LETTER_STATUS = "dead_letter"
 _BACKOFF_BASE_SECONDS = 10       # 10s, 20s, 40s, 80s, 160s
-_WORKER_INTERVAL_SECONDS = 30    # poll every 30 s
+_WORKER_INTERVAL_SECONDS = 30    # poll tiap 30 dtk
 _BATCH_SIZE = 50
 
 
 class PushWorker:
-    """Background thread that drains `pending`/`failed` inspection results
-    to the SQL Server mirror.
+    """Thread background yang mengalirkan hasil inspeksi `pending`/`failed`
+    ke SQL Server mirror.
 
     Lifecycle:
-        pending  → sent          (success)
-        pending  → failed        (first failure; will retry)
-        failed   → sent          (retry success)
-        failed   → dead_letter   (after MAX_RETRY_COUNT failures)
+        pending  → sent          (berhasil)
+        pending  → failed        (gagal pertama kali; akan retry)
+        failed   → sent          (retry berhasil)
+        failed   → dead_letter   (setelah MAX_RETRY_COUNT kali gagal)
 
-    The worker uses exponential back-off based on `retry_count`; it will
-    skip a record whose next-attempt time has not arrived yet.
+    Worker ini pakai exponential back-off berdasarkan `retry_count`; akan
+    melewati record yang waktu percobaan berikutnya belum tiba.
     """
 
     def __init__(
@@ -51,7 +51,7 @@ class PushWorker:
         self._thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
-    # Public control
+    # Kontrol publik
     # ------------------------------------------------------------------
 
     def start(self) -> None:
@@ -73,7 +73,7 @@ class PushWorker:
         logger.info("[push-worker] stopped")
 
     def run_once(self) -> dict:
-        """Process one batch synchronously. Used in tests and admin triggers."""
+        """Proses satu batch secara sinkron. Dipakai di test dan trigger admin."""
         return self._process_batch()
 
     # ------------------------------------------------------------------
@@ -109,7 +109,7 @@ class PushWorker:
 
             retry_count = int(record.get("retry_count") or 0)
 
-            # Dead-letter records that exceeded retry limit
+            # Dead-letter record yang sudah lewat batas retry
             if retry_count >= self._max_retry:
                 self._repo._local_repo.update_result(  # noqa: SLF001
                     int(record["id"]),
@@ -123,7 +123,7 @@ class PushWorker:
                 )
                 continue
 
-            # Exponential back-off: skip if last attempt too recent
+            # Exponential back-off: lewati kalau percobaan terakhir masih terlalu baru
             if not self._is_due(record):
                 skipped += 1
                 continue
@@ -147,7 +147,7 @@ class PushWorker:
         }
 
     def _is_due(self, record: dict) -> bool:
-        """True if enough time has passed since the last push attempt."""
+        """True kalau waktu yang cukup sudah lewat sejak percobaan push terakhir."""
         from datetime import UTC, datetime
 
         last_attempt = record.get("last_push_attempt_at")

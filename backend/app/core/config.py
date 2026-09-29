@@ -1,18 +1,18 @@
-"""Process configuration.
+"""Konfigurasi proses.
 
-Only two kinds of values live here:
+Cuma dua jenis nilai yang ada di sini:
 
-* **Secrets / bootstrap read from the environment** (`.env`): secret key,
-  database backend + credentials, data root, deployment topology (host / port /
-  local-only). These must be known before any JSON store can be opened.
-* **Runtime settings owned by `data/json_store/machine_settings.json`** — the
-  `timing`, `inference` and (for the PLC) `connection` / `io` sections edited
-  from Admin → Machine Settings. The plain defaults below are placeholders;
-  `backend/app/core/container.py` overwrites them from the JSON file at boot
-  via `AppConfig.apply_machine_settings()`. Nothing in this group is read from
-  the environment any more.
+* **Secret / bootstrap yang dibaca dari environment** (`.env`): secret key,
+  backend database + kredensial, data root, topologi deployment (host / port /
+  local-only). Ini harus sudah diketahui sebelum JSON store manapun dibuka.
+* **Runtime settings milik `data/json_store/machine_settings.json`** — bagian
+  `timing`, `inference` dan (untuk PLC) `connection` / `io` yang diedit dari
+  Admin → Machine Settings. Default polos di bawah cuma placeholder;
+  `backend/app/core/container.py` menimpanya dari file JSON saat boot lewat
+  `AppConfig.apply_machine_settings()`. Tidak ada lagi di grup ini yang dibaca
+  dari environment.
 
-Everything else that used to be an env knob is a fixed constant now.
+Selain itu, semua yang dulunya knob env sekarang jadi konstanta tetap.
 """
 from __future__ import annotations
 
@@ -26,35 +26,34 @@ _SQL_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-
 
 
 def _sql_identifier(env_var: str, default: str) -> str:
-    """Read a table/column name from the environment, rejecting anything that
-    isn't a plain (optionally schema-qualified) SQL identifier — these values
-    get interpolated directly into SQL strings, so a bad env var must fail
-    fast at import time rather than open an injection surface."""
+    """Baca nama tabel/kolom dari environment, tolak apa pun yang bukan
+    identifier SQL polos (boleh pakai prefix schema) — nilai ini langsung
+    disisipkan ke string SQL, jadi env var yang salah harus gagal cepat saat
+    import, bukan membuka celah injection."""
     value = os.getenv(env_var, default).strip()
     if not _SQL_IDENTIFIER_PATTERN.fullmatch(value):
         raise ValueError(
-            f"{env_var}={value!r} is not a valid SQL identifier "
-            "(letters, digits, underscore, optional schema prefix)."
+            f"{env_var}={value!r} bukan identifier SQL yang valid "
+            "(huruf, angka, underscore, boleh pakai prefix schema)."
         )
     return value
 
 
 def _sql_identifier_list(env_var: str, default: str) -> list[str]:
-    """Like `_sql_identifier`, but the env var may name more than one column,
-    comma-separated — the same logical value is then written into every
-    listed column. For target tables that keep the same value duplicated
-    across redundant/legacy columns (e.g. both `DateCheckMC` and
-    `DateSendDB`)."""
+    """Sama seperti `_sql_identifier`, tapi env var boleh menyebut lebih dari
+    satu kolom, dipisah koma — nilai logis yang sama akan ditulis ke semua
+    kolom yang disebutkan. Untuk tabel tujuan yang menyimpan nilai sama di
+    beberapa kolom duplikat/legacy (mis. `DateCheckMC` dan `DateSendDB`)."""
     raw = os.getenv(env_var, default)
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     if not parts:
-        raise ValueError(f"{env_var}={raw!r} must name at least one column.")
+        raise ValueError(f"{env_var}={raw!r} harus menyebut minimal satu kolom.")
     for part in parts:
         if not _SQL_IDENTIFIER_PATTERN.fullmatch(part):
             raise ValueError(
-                f"{env_var}={raw!r} contains {part!r}, which is not a valid SQL identifier "
-                "(letters, digits, underscore, optional schema prefix; separate multiple "
-                "column names with commas)."
+                f"{env_var}={raw!r} mengandung {part!r}, yang bukan identifier SQL yang valid "
+                "(huruf, angka, underscore, boleh prefix schema; pisahkan beberapa "
+                "nama kolom dengan koma)."
             )
     return parts
 
@@ -64,24 +63,24 @@ DATA_ROOT = Path(os.getenv("QC_SUITE_DATA_ROOT", PROJECT_ROOT / "data")).resolve
 JSON_STORE_DIR = DATA_ROOT / "json_store"
 MODELS_DIR = DATA_ROOT / "models"
 
-# ── Fixed constants (formerly env knobs) ─────────────────────────────
+# ── Konstanta tetap (dulunya knob env) ─────────────────────────────
 ACCESS_TOKEN_TTL_SECONDS = 86400
 PUSH_WORKER_INTERVAL_SECONDS = 30
 PUSH_WORKER_MAX_RETRY = 5
-# Only these reject reasons (plus COMMIT_TIMEOUT) are terminal; everything else
-# stays pending so inference keeps retrying until ACCEPT.
+# Cuma reject reason ini (plus COMMIT_TIMEOUT) yang terminal; selain itu
+# tetap pending supaya inference terus mencoba sampai ACCEPT.
 INSPECT_HARD_REJECT_REASONS = "WRONG_TYPE"
 
 
 @dataclass(slots=True)
 class AppConfig:
-    # ── Secrets / bootstrap (env) ────────────────────────────────────
+    # ── Secret / bootstrap (env) ────────────────────────────────────
     host: str = os.getenv("QC_SUITE_HOST", "127.0.0.1")
     port: int = int(os.getenv("QC_SUITE_PORT", "8100"))
     debug: bool = os.getenv("QC_SUITE_DEBUG", "0").strip() == "1"
     secret_key: str = os.getenv("QC_SUITE_SECRET_KEY", "qc-suite-dev-secret")
     local_only: bool = os.getenv("QC_SUITE_LOCAL_ONLY", "1").strip() != "0"
-    # Deployment environment: "dev" or "prod". Controls hardening checks.
+    # Environment deployment: "dev" atau "prod". Mengontrol pengecekan keamanan.
     environment: str = os.getenv("QC_SUITE_ENV", "dev")
     relational_backend: str = os.getenv("QC_SUITE_DATABASE_BACKEND", "").strip().lower()
     sql_server: str = os.getenv("MSSQL_SERVER", "")
@@ -96,27 +95,27 @@ class AppConfig:
     postgresql_password: str = os.getenv("POSTGRESQL_PASSWORD", "")
     postgresql_schema: str = os.getenv("POSTGRESQL_SCHEMA", "public")
     postgresql_sslmode: str = os.getenv("POSTGRESQL_SSLMODE", "prefer")
-    # External "operator" table (owned by the factory MES, not this app) that
-    # backs authentication + user management on the SQL backends. Table and
-    # column names are deployment-specific — configurable so this app can
-    # point at whatever the site's own schema actually calls them.
+    # Tabel eksternal "operator" (milik MES pabrik, bukan app ini) yang jadi
+    # basis autentikasi + manajemen user di backend SQL. Nama tabel dan
+    # kolom spesifik per deployment — configurable supaya app ini bisa
+    # menunjuk ke skema apa pun yang dipakai lokasi tersebut.
     operator_table: str = _sql_identifier("QC_SUITE_OPERATOR_TABLE", "operator")
     operator_col_no: str = _sql_identifier("QC_SUITE_OPERATOR_COL_NO", "No")
     operator_col_mc_id: str = _sql_identifier("QC_SUITE_OPERATOR_COL_MC_ID", "MC_ID")
     operator_col_rfid: str = _sql_identifier("QC_SUITE_OPERATOR_COL_RFID", "No_RFID")
     operator_col_member_id: str = _sql_identifier("QC_SUITE_OPERATOR_COL_MEMBER_ID", "Member_ID")
     operator_col_status: str = _sql_identifier("QC_SUITE_OPERATOR_COL_STATUS", "StatusMP")
-    # External inspection-result push table (owned by the plant MES /
-    # reporting system, not this app) that `HybridInspectionResultsRepository`
-    # mirrors accepted results into. Same rationale as the operator table
-    # above: never created/altered by this app, table and column names are
-    # deployment-specific. The five data columns keep the existing fixed
-    # logical mapping (PartName/DateCheckMC/MPCheck/Data1/Data2/Line from
-    # `build_sql_payload`) — only the *actual* column names on the target
-    # table are configurable here. Each of the five may name more than one
-    # physical column (comma-separated) when the target table keeps the same
-    # value duplicated across redundant columns — the same value is then
-    # written into every listed column on insert.
+    # Tabel push hasil-inspeksi eksternal (milik MES pabrik / sistem
+    # reporting, bukan app ini) yang jadi tujuan mirror `HybridInspectionResultsRepository`
+    # untuk hasil yang diterima. Alasannya sama seperti tabel operator di
+    # atas: tidak pernah dibuat/diubah oleh app ini, nama tabel dan kolom
+    # spesifik per deployment. Lima kolom data tetap pakai mapping logis
+    # yang sudah ada (PartName/DateCheckMC/MPCheck/Data1/Data2/Line dari
+    # `build_sql_payload`) — cuma nama kolom *fisik* di tabel tujuan yang
+    # configurable di sini. Tiap satu dari lima itu boleh menyebut lebih
+    # dari satu kolom fisik (dipisah koma) kalau tabel tujuan menyimpan
+    # nilai yang sama di kolom-kolom duplikat — nilai yang sama itu lalu
+    # ditulis ke semua kolom yang disebutkan saat insert.
     inspection_push_table: str = _sql_identifier("QC_SUITE_INSPECTION_TABLE", "qc_inspection_push")
     inspection_push_col_id: str = _sql_identifier("QC_SUITE_INSPECTION_COL_ID", "id")
     inspection_push_col_part_name: list[str] = field(
@@ -138,16 +137,16 @@ class AppConfig:
         default_factory=lambda: _sql_identifier_list("QC_SUITE_INSPECTION_COL_LINE", "Line")
     )
 
-    # ── Fixed constants exposed on the instance (services read them here) ──
+    # ── Konstanta tetap yang diekspos di instance (dibaca service di sini) ──
     access_token_ttl_seconds: int = ACCESS_TOKEN_TTL_SECONDS
     push_worker_interval_seconds: int = PUSH_WORKER_INTERVAL_SECONDS
     push_worker_max_retry: int = PUSH_WORKER_MAX_RETRY
     inspect_hard_reject_reasons: str = INSPECT_HARD_REJECT_REASONS
-    # Request/access logging follows debug mode.
+    # Logging request/access ikut mode debug.
     access_logs_enabled: bool = os.getenv("QC_SUITE_DEBUG", "0").strip() == "1"
     werkzeug_logs_enabled: bool = os.getenv("QC_SUITE_DEBUG", "0").strip() == "1"
 
-    # ── Owned by machine_settings.json → `inference` (placeholders) ───
+    # ── Milik machine_settings.json → `inference` (placeholder) ───
     sticker_inference_mode: str = "auto"
     device_mode: str = "auto"
     cuda_device_id: int = 0
@@ -156,7 +155,7 @@ class AppConfig:
     default_sticker_model_path: str = ""
     default_sticker_model_meta_path: str = ""
 
-    # ── Owned by machine_settings.json → `timing` (placeholders) ──────
+    # ── Milik machine_settings.json → `timing` (placeholder) ──────
     phase_next_part_delay_ms: int = 2000
     phase_sticker_install_delay_ms: int = 0
     accept_stable_frames: int = 1
@@ -171,16 +170,16 @@ class AppConfig:
     session_idle_timeout_s: int = 300
     max_consecutive_rejects: int = 0
 
-    # ── Owned by machine_settings.json → `identity` (placeholder) ─────
-    # Falls back for SessionState.line_id when a session is started without
-    # one — the desktop client never sends line_id (line/station slots were
-    # removed 2026-09-18), so this is the only way "Line" on the SQL push
-    # ends up non-null. Admin -> Machine Settings -> Identity.
+    # ── Milik machine_settings.json → `identity` (placeholder) ─────
+    # Fallback untuk SessionState.line_id kalau sesi dimulai tanpa line_id —
+    # client desktop tidak pernah mengirim line_id (slot line/station sudah
+    # dihapus 2026-09-18), jadi ini satu-satunya cara "Line" di push SQL
+    # tidak jadi null. Admin -> Machine Settings -> Identity.
     machine_line_id: str = ""
 
     def apply_machine_settings(self, settings) -> None:
-        """Copy the `inference` and `timing` sections of MachineSettings onto this
-        object so every service keeps reading `app_config.<field>` unchanged."""
+        """Salin bagian `inference` dan `timing` dari MachineSettings ke object
+        ini supaya tiap service tetap baca `app_config.<field>` tanpa berubah."""
         self.machine_line_id = str(getattr(settings.identity, "line", "") or "").strip()
         inf = settings.inference
         self.sticker_inference_mode = str(inf.mode or "auto").strip().lower() or "auto"
@@ -223,8 +222,8 @@ class AppConfig:
 
     @property
     def database_backend(self) -> str:
-        """`QC_SUITE_DATABASE_BACKEND` must be set explicitly; a selected SQL
-        backend with incomplete credentials silently falls back to "local"."""
+        """`QC_SUITE_DATABASE_BACKEND` harus di-set eksplisit; backend SQL
+        yang dipilih tapi kredensialnya tidak lengkap diam-diam jatuh ke "local"."""
         backend = self.relational_backend
         if backend == "sqlserver":
             return backend if self._has_sqlserver_credentials() else "local"

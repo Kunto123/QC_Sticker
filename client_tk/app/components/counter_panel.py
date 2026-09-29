@@ -17,7 +17,7 @@ class CounterPanel(ctk.CTkFrame):
         super().__init__(master, fg_color=PANEL_BG, corner_radius=16, border_width=1, border_color=BORDER)
         self.grid_columnconfigure(0, weight=1)
 
-        # Match Ratio - prominent display
+        # Match Ratio - tampilan menonjol
         self.match_ratio_var = ctk.CTkLabel(
             self,
             text="Match Ratio: --%",
@@ -26,7 +26,7 @@ class CounterPanel(ctk.CTkFrame):
         )
         self.match_ratio_var.pack(anchor="w", padx=16, pady=(16, 8))
 
-        # Session counters (secondary)
+        # Counter session (sekunder)
         cards = ctk.CTkFrame(self, fg_color="transparent")
         cards.pack(fill="x", padx=12, pady=(0, 8))
 
@@ -61,9 +61,9 @@ class CounterPanel(ctk.CTkFrame):
                 self.match_ratio_var.configure(text="Match Ratio: --%", text_color=TEXT_PRIMARY)
 
     def update_match_ratio(self, ratio: float) -> None:
-        """Update the match ratio display with color coding."""
+        """Update tampilan match ratio dengan pengkodean warna."""
         self.match_ratio_var.configure(text=f"Match Ratio: {ratio:.1f}%")
-        # Color: green if 100%, yellow if partial, red if 0%
+        # Warna: hijau kalau 100%, kuning kalau sebagian, merah kalau 0%
         if ratio >= 100.0:
             self.match_ratio_var.configure(text_color=SUCCESS)
         elif ratio > 0.0:

@@ -1,4 +1,4 @@
-"""async_bridge.py — non-blocking API calls for Tkinter.
+"""async_bridge.py — pemanggilan API non-blocking untuk Tkinter.
 
 Usage
 -----
@@ -12,9 +12,9 @@ Usage
 
     run_async(root_widget, api_client.list_templates, callback=on_done)
 
-``run_async`` submits *fn* to a background daemon thread. The worker never
-touches Tk directly. Instead, the owning widget polls for completion on the Tk
-main thread and then delivers the result to *callback*.
+``run_async`` mengirim *fn* ke thread daemon background. Worker tidak pernah
+menyentuh Tk secara langsung. Sebagai gantinya, widget pemilik melakukan poll
+untuk selesainya proses di thread utama Tk lalu mengantarkan hasilnya ke *callback*.
 """
 from __future__ import annotations
 
@@ -33,21 +33,21 @@ def run_async(
     args: tuple = (),
     kwargs: dict | None = None,
 ) -> threading.Thread:
-    """Run *fn(*args, **kwargs)* in a background thread.
+    """Jalankan *fn(*args, **kwargs)* di thread background.
 
     Parameters
     ----------
     widget:
-        Any live Tkinter widget used to schedule the callback via
+        Widget Tkinter hidup mana pun yang dipakai untuk menjadwalkan callback lewat
         ``widget.after(0, ...)``.
     fn:
-        The callable to execute off the main thread (e.g. an API call).
+        Callable yang dieksekusi di luar thread utama (mis. pemanggilan API).
     callback:
-        ``callback(result, error)`` — called on the Tk main thread once *fn*
-        completes.  *error* is ``None`` on success, an ``Exception`` on
-        failure.  *result* is ``None`` on failure.
+        ``callback(result, error)`` — dipanggil di thread utama Tk setelah *fn*
+        selesai. *error* adalah ``None`` kalau berhasil, ``Exception`` kalau
+        gagal. *result* adalah ``None`` kalau gagal.
     args / kwargs:
-        Forwarded to *fn*.
+        Diteruskan ke *fn*.
     """
     _kwargs = kwargs or {}
     result_box: dict[str, Any] = {"result": None, "error": None}

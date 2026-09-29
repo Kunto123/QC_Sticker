@@ -54,12 +54,13 @@ class InspectionResultsRepository(JsonRepository):
         super().__init__("inspection_results.json", {"results": []})
 
     def create_result(self, payload: dict[str, Any]) -> dict[str, Any]:
-        # Whole load->mutate->save sequence must hold the lock, not just the
-        # individual load()/save() calls — otherwise a concurrent writer (the
-        # push worker's background thread updating push_status on other rows)
-        # can load a stale snapshot between our load() and save() and silently
-        # overwrite this newly-appended record when it saves. RLock is
-        # reentrant, so the nested load()/save() calls below re-acquire fine.
+        # Seluruh urutan load->ubah->save harus pegang lock, bukan cuma
+        # panggilan load()/save() individual — kalau tidak, writer konkuren
+        # (thread background push worker yang update push_status di baris
+        # lain) bisa load snapshot basi di antara load() dan save() kita dan
+        # diam-diam menimpa record yang baru saja ditambahkan saat dia save.
+        # RLock itu reentrant, jadi panggilan load()/save() bersarang di
+        # bawah ini tetap bisa re-acquire dengan aman.
         with self._lock:
             store = self.load()
             items = store["results"]

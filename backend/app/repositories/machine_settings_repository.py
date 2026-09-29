@@ -1,7 +1,8 @@
-"""Machine Settings repository — `data/json_store/machine_settings.json`.
+"""Repository Machine Settings — `data/json_store/machine_settings.json`.
 
-No env seeding: a missing file means dataclass defaults. Saving always writes
-the current schema version, so a v1 file is upgraded on the first PUT.
+Tidak ada seeding dari env: file yang tidak ada berarti pakai default dataclass.
+Menyimpan selalu menulis schema version terkini, jadi file v1 otomatis
+ter-upgrade pada PUT pertama.
 """
 from __future__ import annotations
 

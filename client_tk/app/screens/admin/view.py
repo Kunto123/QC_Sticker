@@ -257,7 +257,7 @@ class AdminScreen(ctk.CTkFrame):
                 return notebook.get()
             was_templates = (notebook.get() == "Templates")
             going_to_templates = (tab_id == "Templates")
-            # Stop live camera when leaving Templates tab to prevent MSMF camera conflict
+            # Hentikan live camera saat keluar dari tab Templates supaya tidak konflik kamera MSMF
             if was_templates and not going_to_templates:
                 picker = getattr(self, "preset_roi_picker", None)
                 if picker is not None and getattr(picker, "_cam_running", False):
@@ -266,7 +266,7 @@ class AdminScreen(ctk.CTkFrame):
                     except Exception:
                         pass
                     if hasattr(self, "_live_cam_btn"):
-                        self._live_cam_btn.configure(text="Start Live Camera")
+                        self._live_cam_btn.configure(text="Mulai Live Camera")
             notebook.set(tab_id)
             return tab_id
 
@@ -566,28 +566,28 @@ class AdminScreen(ctk.CTkFrame):
         self.operator_edit_username_var.set(user.get("username", ""))
         self.operator_edit_role_var.set(str(user.get("role") or "OPERATOR").strip().upper())
         self.operator_form_title.configure(text=f"Edit User #{user_id}")
-        self.operator_form_hint.configure(text="Change the role/MC_ID, or delete this user.")
+        self.operator_form_hint.configure(text="Ubah role/MC_ID, atau hapus user ini.")
         self.operator_username_var.set(user.get("username", ""))
         self.operator_role_var.set(str(user.get("role") or "OPERATOR").strip().upper())
         self.operator_mc_id_var.set(str(user.get("mc_id") or ""))
-        self.operator_save_btn.configure(text="Save Changes")
+        self.operator_save_btn.configure(text="Simpan Perubahan")
         self.operator_cancel_btn.configure(state="normal")
         self.operator_delete_btn.configure(state="normal")
 
     def _on_cancel_edit(self) -> None:
-        """Reset the form back to create mode."""
+        """Reset form kembali ke mode create."""
         self.operator_edit_id = None
         self.operator_username_var.set("")
         self.operator_role_var.set("OPERATOR")
         self.operator_mc_id_var.set("")
-        self.operator_form_title.configure(text="Add User")
-        self.operator_form_hint.configure(text="Create a new user, then bind RFID below.")
-        self.operator_save_btn.configure(text="Create User")
+        self.operator_form_title.configure(text="Tambah User")
+        self.operator_form_hint.configure(text="Buat user baru, lalu bind RFID di bawah.")
+        self.operator_save_btn.configure(text="Buat User")
         self.operator_cancel_btn.configure(state="disabled")
         self.operator_delete_btn.configure(state="disabled")
-        # Reset unified bind state
+        # Reset state bind unified
         self.bind_target_user_id = None
-        self.bind_target_label.configure(text="Select a user from the list")
+        self.bind_target_label.configure(text="Pilih user dari daftar")
         self.unified_rfid_var.set("")
         self.bind_rfid_status.configure(text="")
 
@@ -1073,30 +1073,30 @@ class AdminScreen(ctk.CTkFrame):
             except Exception:
                 pass
             if hasattr(self, "_live_cam_btn"):
-                self._live_cam_btn.configure(text="Start Live Camera")
+                self._live_cam_btn.configure(text="Mulai Live Camera")
 
     def shutdown(self) -> None:
-        """Cleanup on screen teardown: stop live camera if running."""
+        """Cleanup saat screen di-teardown: hentikan live camera kalau masih jalan."""
         self._stop_live_camera_if_running()
 
     def _toggle_live_camera(self) -> None:
-        """Toggle live camera feed on the ROI picker canvas."""
+        """Toggle feed live camera di canvas ROI picker."""
         picker = getattr(self, "preset_roi_picker", None)
         if picker is None:
-            messagebox.showwarning("Camera", "ROI picker not initialized.")
+            messagebox.showwarning("Camera", "ROI picker belum di-inisialisasi.")
             return
         if getattr(picker, "_cam_running", False):
             picker.stop_live_camera()
-            self._live_cam_btn.configure(text="Start Live Camera")
-            self._set_status("Live camera stopped.")
+            self._live_cam_btn.configure(text="Mulai Live Camera")
+            self._set_status("Live camera dihentikan.")
         else:
             cam_idx = int(_float_or_default(self.preset_camera_index_var.get(), 0))
             try:
                 picker.start_live_camera(cam_idx)
-                self._live_cam_btn.configure(text="Stop Live Camera")
-                self._set_status(f"Live camera {cam_idx} started. Drag ROIs on the live feed.")
+                self._live_cam_btn.configure(text="Hentikan Live Camera")
+                self._set_status(f"Live camera {cam_idx} dimulai. Drag ROI di feed live.")
             except Exception as exc:
-                messagebox.showerror("Camera", f"Failed to start camera {cam_idx}: {exc}")
+                messagebox.showerror("Camera", f"Gagal memulai kamera {cam_idx}: {exc}")
 
     def _reset_preset_roi(self) -> None:
         kind = self._preset_roi_kind()
@@ -1921,7 +1921,7 @@ class AdminScreen(ctk.CTkFrame):
             messagebox.showerror("Upload", str(exc))
             return
         self._admin_import_path = ""
-        self._admin_import_path_var.set("No file selected")
+        self._admin_import_path_var.set("Belum ada file dipilih")
         self._admin_import_name_var.set("")
         self.refresh_model_options()
         msg = f"Model '{name}' uploaded ({runtime})."

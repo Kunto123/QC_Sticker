@@ -42,13 +42,13 @@ class DeviceRuntimeResolver:
         return self._torch
 
     def _cuda_status(self) -> tuple[bool, int, str | None]:
-        """Return (available, device_count, unavail_reason).
+        """Balikin (available, device_count, unavail_reason).
 
-        ``unavail_reason`` is one of:
-        * ``None``                    — CUDA is available (no failure)
-        * ``"torch_not_installed"``   — torch package cannot be imported
-        * ``"cuda_unavailable"``      — torch imported but ``cuda.is_available()`` is False
-        * ``"cuda_device_count_zero"``— CUDA is available but no devices are visible
+        ``unavail_reason`` salah satu dari:
+        * ``None``                    — CUDA tersedia (tidak ada masalah)
+        * ``"torch_not_installed"``   — package torch tidak bisa di-import
+        * ``"cuda_unavailable"``      — torch ter-import tapi ``cuda.is_available()`` False
+        * ``"cuda_device_count_zero"``— CUDA tersedia tapi tidak ada device yang terlihat
         """
         if self._cuda_state is not None:
             return self._cuda_state

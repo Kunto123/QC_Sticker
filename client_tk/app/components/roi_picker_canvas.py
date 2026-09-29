@@ -51,7 +51,7 @@ def _draw_crosshair(frame, px: int, py: int, color, label: str = "") -> None:
 
 
 class RoiPickerCanvas(ctk.CTkFrame):
-    """Interactive canvas for visualising ROI boxes and picking expected center.
+    """Canvas interaktif untuk memvisualisasikan box ROI dan memilih expected center.
 
     Usage::
 
@@ -115,7 +115,7 @@ class RoiPickerCanvas(ctk.CTkFrame):
         self._photo = None
 
     # ------------------------------------------------------------------
-    # Public API
+    # API publik
     # ------------------------------------------------------------------
 
     def load_image(self, bgr_frame: np.ndarray | None) -> None:
@@ -131,7 +131,7 @@ class RoiPickerCanvas(ctk.CTkFrame):
 
     def set_active_roi(self, kind: str | None) -> None:
         if kind not in {"part_ready", "sticker", None}:
-            raise ValueError("kind must be 'part_ready', 'sticker', or None")
+            raise ValueError("kind harus 'part_ready', 'sticker', atau None")
         self._active_roi_kind = kind
         self.redraw()
 
@@ -140,7 +140,7 @@ class RoiPickerCanvas(ctk.CTkFrame):
             return dict(self._part_ready_roi)
         if kind == "sticker":
             return dict(self._sticker_roi)
-        raise ValueError("kind must be 'part_ready' or 'sticker'")
+        raise ValueError("kind harus 'part_ready' atau 'sticker'")
 
     def set_expected_center(self, cx: float | None, cy: float | None) -> None:
         self._cx = float(cx) if cx is not None else 0.5
@@ -158,19 +158,19 @@ class RoiPickerCanvas(ctk.CTkFrame):
     # ------------------------------------------------------------------
 
     def start_live_camera(self, camera_index: int = 0) -> None:
-        """Start capturing from camera and displaying on canvas."""
+        """Mulai capture dari kamera dan tampilkan di canvas."""
         import threading
         if hasattr(self, "_cam_thread") and self._cam_thread.is_alive():
             self.stop_live_camera()
         self._cam_running = True
         self._cam = cv2.VideoCapture(camera_index)
         if not self._cam.isOpened():
-            raise RuntimeError(f"Cannot open camera {camera_index}")
+            raise RuntimeError(f"Tidak bisa membuka kamera {camera_index}")
         self._cam_thread = threading.Thread(target=self._cam_loop, daemon=True)
         self._cam_thread.start()
 
     def stop_live_camera(self) -> None:
-        """Stop live camera feed."""
+        """Hentikan feed kamera live."""
         self._cam_running = False
         if hasattr(self, "_cam_thread"):
             self._cam_thread.join(timeout=2.0)
@@ -179,7 +179,7 @@ class RoiPickerCanvas(ctk.CTkFrame):
             self._cam = None
 
     def _cam_loop(self) -> None:
-        """Background thread: read frames and schedule redraw."""
+        """Thread background: baca frame dan jadwalkan redraw."""
         while getattr(self, "_cam_running", False):
             ret, frame = self._cam.read()
             if not ret:
@@ -191,7 +191,7 @@ class RoiPickerCanvas(ctk.CTkFrame):
                 break
 
     # ------------------------------------------------------------------
-    # Draw
+    # Gambar
     # ------------------------------------------------------------------
 
     def redraw(self) -> None:
@@ -230,7 +230,7 @@ class RoiPickerCanvas(ctk.CTkFrame):
         dh = max(1, int(src_h * scale))
         frame = cv2.resize(self._source_frame, (dw, dh), interpolation=cv2.INTER_AREA)
 
-        # Expand canvas to (cw, ch) with black padding
+        # Perluas canvas ke (cw, ch) dengan padding hitam
         canvas_frame = np.zeros((ch, cw, 3), dtype=np.uint8)
         off_x = (cw - dw) // 2
         off_y = (ch - dh) // 2
@@ -261,7 +261,7 @@ class RoiPickerCanvas(ctk.CTkFrame):
         return canvas_frame
 
     # ------------------------------------------------------------------
-    # Drag handlers
+    # Handler drag
     # ------------------------------------------------------------------
 
     def _draw_handles(self, frame, x: int, y: int, w: int, h: int, color) -> None:

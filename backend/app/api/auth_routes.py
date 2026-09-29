@@ -18,10 +18,10 @@ ALLOWED_MANAGED_ROLES = {UserRole.ADMIN.value, UserRole.OPERATOR.value}
 def _normalize_managed_role(raw_role: object, *, field_name: str = "role") -> str:
     role = str(raw_role or "").strip().upper()
     if not role:
-        raise ValueError(f"{field_name} is required")
+        raise ValueError(f"{field_name} wajib diisi")
     if role not in ALLOWED_MANAGED_ROLES:
         allowed = ", ".join(sorted(ALLOWED_MANAGED_ROLES))
-        raise ValueError(f"{field_name} must be one of: {allowed}")
+        raise ValueError(f"{field_name} harus salah satu dari: {allowed}")
     return role
 
 
@@ -36,7 +36,7 @@ def _client_name(payload: dict) -> str | None:
 
 
 def _try_audit(event_type: str, **kwargs) -> None:
-    """Fire-and-forget audit log. Never raises so auth ops are not blocked."""
+    """Audit log fire-and-forget. Tidak pernah raise supaya operasi auth tidak terblokir."""
     try:
         audit_repo.log(event_type, **kwargs)
     except Exception as exc:  # noqa: BLE001
@@ -53,7 +53,7 @@ def _rfid_hash_from_payload(payload: dict) -> tuple[str, str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Auth endpoints
+# Endpoint auth
 # ---------------------------------------------------------------------------
 
 @auth_blueprint.post("/login")
@@ -80,7 +80,7 @@ def login():
                 client_name=client,
                 details=str(exc),
             )
-            return jsonify({"error": "Invalid RFID card"}), 401
+            return jsonify({"error": "Kartu RFID tidak valid"}), 401
         rfid_last4 = _uid_last4
         user = users_repo.authenticate_rfid(normalized_uid=normalized_uid, rfid_uid_hash=rfid_uid_hash)
         credential_label = "rfid"
@@ -91,9 +91,9 @@ def login():
                 username=username_input or None,
                 ip_address=ip,
                 client_name=client,
-                details="Missing username or password",
+                details="Username atau password tidak diisi",
             )
-            return jsonify({"error": "Username and password are required"}), 400
+            return jsonify({"error": "Username dan password wajib diisi"}), 400
         user = users_repo.authenticate(username_input, password_input)
         credential_label = "password"
 
@@ -103,10 +103,10 @@ def login():
             username=username_input if credential_label == "password" else None,
             ip_address=ip,
             client_name=client,
-            details=f"Invalid {credential_label} credentials"
+            details=f"Kredensial {credential_label} tidak valid"
                      + (f"; rfid_last4={rfid_last4}" if rfid_last4 else ""),
         )
-        return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify({"error": "Kredensial tidak valid"}), 401
 
     if user.role.value not in ALLOWED_MANAGED_ROLES:
         _try_audit(
@@ -115,16 +115,16 @@ def login():
             username=user.username,
             ip_address=ip,
             client_name=client,
-            details=f"Unsupported role for {credential_label} login",
+            details=f"Role tidak didukung untuk login {credential_label}",
         )
-        return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify({"error": "Kredensial tidak valid"}), 401
 
-    # Operators may only log in on the machine/line their MC_ID is assigned
-    # to (Admin -> Machine Settings -> Identity -> Line). LEADERPI/admin is
-    # never gated by this, so there's always a way to fix a wrong/blank Line
-    # without getting locked out. No restriction while Line itself is unset
-    # (fresh/unconfigured machine) — otherwise no operator could ever log in
-    # before an admin first sets it.
+    # Operator cuma boleh login di mesin/line sesuai MC_ID-nya (Admin ->
+    # Machine Settings -> Identity -> Line). LEADERPI/admin TIDAK pernah kena
+    # gate ini, supaya selalu ada jalan untuk membetulkan Line yang salah/
+    # kosong tanpa ikut terkunci. Tidak ada pembatasan selama Line sendiri
+    # belum di-set (mesin baru/belum dikonfigurasi) — kalau tidak, tidak ada
+    # operator yang bisa login sebelum admin pertama kali mengisi Line.
     if user.role == UserRole.OPERATOR:
         configured_line = str(getattr(app_config, "machine_line_id", "") or "").strip().upper()
         if configured_line:
@@ -138,8 +138,8 @@ def login():
                     ip_address=ip,
                     client_name=client,
                     details=(
-                        f"MC_ID '{user_mc_id or '-'}' does not match configured line "
-                        f"'{configured_line}'"
+                        f"MC_ID '{user_mc_id or '-'}' tidak cocok dengan line yang "
+                        f"dikonfigurasi '{configured_line}'"
                     ),
                 )
                 return jsonify({"error": "Akun ini tidak terdaftar untuk line mesin ini."}), 403
@@ -214,7 +214,7 @@ def list_sessions():
 
 
 # ---------------------------------------------------------------------------
-# User management (admin only)
+# Manajemen user (khusus admin)
 # ---------------------------------------------------------------------------
 
 @auth_blueprint.get("/users")
@@ -326,14 +326,14 @@ def reset_user_password(user_id: int):
     payload = request.get_json(force=True) or {}
     new_password = str(payload.get("password") or "").strip()
     if len(new_password) < 6:
-        return jsonify({"error": "password must be at least 6 characters"}), 400
+        return jsonify({"error": "password minimal 6 karakter"}), 400
     try:
         record = users_repo.set_password(user_id, new_password)
     except ValueError as exc:
         message = str(exc)
         status_code = 404 if "not found" in message.lower() else 400
         return jsonify({"error": message}), status_code
-    # Revoke existing sessions so the user must re-authenticate
+    # Cabut sesi yang ada supaya user harus login ulang
     token_store.revoke_user(user_id)
     _try_audit(
         "password_reset",
@@ -401,7 +401,7 @@ def clear_user_rfid(user_id: int):
 def revoke_user_sessions(user_id: int):
     target = users_repo.get_by_id(user_id)
     if target is None:
-        return jsonify({"error": "User not found."}), 404
+        return jsonify({"error": "User tidak ditemukan."}), 404
     revoked = token_store.revoke_user(user_id)
     _try_audit(
         "session_revoked",
@@ -420,10 +420,10 @@ def revoke_user_sessions(user_id: int):
 def delete_user(user_id: int):
     target = users_repo.get_by_id(user_id)
     if target is None:
-        return jsonify({"error": "User not found."}), 404
-    # Prevent self-deletion
+        return jsonify({"error": "User tidak ditemukan."}), 404
+    # Cegah menghapus akun sendiri
     if user_id == g.current_user.id:
-        return jsonify({"error": "Cannot delete your own account."}), 400
+        return jsonify({"error": "Tidak bisa menghapus akun sendiri."}), 400
     removed = users_repo.delete_user(user_id)
     token_store.revoke_user(user_id)
     _try_audit(
@@ -438,17 +438,17 @@ def delete_user(user_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Audit log (admin only)
+# Audit log (khusus admin)
 # ---------------------------------------------------------------------------
 
 @auth_blueprint.get("/audit-log")
 @require_roles(UserRole.ADMIN)
 def get_audit_log():
-    """Return recent auth audit events.
+    """Ambil event audit auth terbaru.
 
     Query params:
-    - ``limit``   max entries to return (default 100, max 500)
-    - ``user_id`` optional filter by user
+    - ``limit``   jumlah maksimum entri (default 100, maks 500)
+    - ``user_id`` filter opsional berdasarkan user
     """
     try:
         limit = min(500, max(1, int(request.args.get("limit", 100))))
@@ -460,5 +460,5 @@ def get_audit_log():
         try:
             user_id = int(user_id_raw)
         except (ValueError, TypeError):
-            return jsonify({"error": "user_id must be an integer"}), 400
+            return jsonify({"error": "user_id harus berupa angka"}), 400
     return jsonify(audit_repo.list_recent(limit=limit, user_id=user_id))

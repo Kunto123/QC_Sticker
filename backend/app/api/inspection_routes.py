@@ -34,7 +34,7 @@ def _parse_optional_float(value: object, *, field_name: str) -> float | None:
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must be numeric") from exc
+        raise ValueError(f"{field_name} harus berupa angka") from exc
 
 
 @inspection_blueprint.post("/inspection/sessions/start")
@@ -95,7 +95,7 @@ def stop_session(session_id: str):
 @inspection_blueprint.post("/inspection/sessions/<session_id>/release")
 @require_roles(UserRole.ADMIN, UserRole.OPERATOR)
 def manual_release(session_id: str):
-    """Operator NEUTRAL release: unclamp + reset cycle without committing a result."""
+    """NEUTRAL release oleh operator: buka clamp + reset siklus tanpa commit hasil."""
     try:
         result = inspection_session_service.manual_release(session_id, reason="manual_operator")
     except ValueError as exc:
@@ -118,7 +118,7 @@ def list_reject_logs():
 def latest_preview():
     result = inspection_session_service.get_latest_preview()
     if result is None:
-        return jsonify({"error": "No active session with frames available."}), 404
+        return jsonify({"error": "Tidak ada sesi aktif dengan frame yang tersedia."}), 404
     return safe_jsonify(result)
 
 
@@ -131,7 +131,7 @@ def list_inspections():
             if request.args.get("template_version_id") else None
         )
     except (ValueError, TypeError):
-        return jsonify({"error": "template_version_id must be an integer"}), 400
+        return jsonify({"error": "template_version_id harus berupa angka"}), 400
     items = inspection_results_repo.list_results(
         line_id=request.args.get("line_id") or None,
         station_id=request.args.get("station_id") or None,
@@ -150,7 +150,7 @@ def list_inspections():
 def get_inspection(result_id: int):
     item = inspection_results_repo.get_result(result_id)
     if item is None:
-        return jsonify({"error": "Inspection result not found"}), 404
+        return jsonify({"error": "Hasil inspeksi tidak ditemukan"}), 404
     return safe_jsonify(item)
 
 
@@ -159,11 +159,11 @@ def get_inspection(result_id: int):
 def patch_inspection(result_id: int):
     payload = request.get_json(force=True) or {}
     if not isinstance(payload, dict):
-        return jsonify({"error": "Request body must be an object"}), 400
+        return jsonify({"error": "Request body harus berupa object"}), 400
 
     current = inspection_results_repo.get_result(result_id)
     if current is None:
-        return jsonify({"error": "Inspection result not found"}), 404
+        return jsonify({"error": "Hasil inspeksi tidak ditemukan"}), 404
 
     updates: dict = {}
     changed_fields: list[str] = []
@@ -176,7 +176,7 @@ def patch_inspection(result_id: int):
             decision_code = DecisionCode(decision_candidate).value
         except ValueError as exc:
             allowed = ", ".join(member.value for member in DecisionCode)
-            return jsonify({"error": f"decision_code must be one of: {allowed}"}), 400
+            return jsonify({"error": f"decision_code harus salah satu dari: {allowed}"}), 400
         updates["decision_code"] = decision_code
         updates["decision"] = decision_code
         changed_fields.extend(["decision_code", "decision"])
@@ -191,11 +191,11 @@ def patch_inspection(result_id: int):
                 updates["reject_reason_code"] = RejectReasonCode(reject_candidate).value
             except ValueError:
                 allowed = ", ".join(member.value for member in RejectReasonCode)
-                return jsonify({"error": f"reject_reason_code must be one of: {allowed}"}), 400
+                return jsonify({"error": f"reject_reason_code harus salah satu dari: {allowed}"}), 400
         changed_fields.append("reject_reason_code")
 
     if decision_code == DecisionCode.ACCEPT.value and updates.get("reject_reason_code") not in (None, ""):
-        return jsonify({"error": "reject_reason_code must be empty when decision_code is ACCEPT"}), 400
+        return jsonify({"error": "reject_reason_code harus kosong kalau decision_code ACCEPT"}), 400
 
     if "part_ready_match_ratio" in payload:
         try:
@@ -227,7 +227,7 @@ def patch_inspection(result_id: int):
         updates["correction_note"] = note
 
     if not updates:
-        return jsonify({"error": "No supported fields to update"}), 400
+        return jsonify({"error": "Tidak ada field yang didukung untuk diupdate"}), 400
 
     now = datetime.now(UTC).isoformat()
     corrections = list(current.get("corrections") or [])
@@ -276,7 +276,7 @@ def patch_inspection(result_id: int):
 def delete_inspection(result_id: int):
     current = inspection_results_repo.get_result(result_id)
     if current is None:
-        return jsonify({"error": "Inspection result not found"}), 404
+        return jsonify({"error": "Hasil inspeksi tidak ditemukan"}), 404
 
     removed = inspection_results_repo.delete_result(result_id)
     _try_audit(
@@ -342,7 +342,7 @@ def retry_failed_inspection_pushes():
 @inspection_blueprint.post("/inspections/push-worker/trigger")
 @require_roles(UserRole.ADMIN)
 def trigger_push_worker():
-    """Manually trigger one push-worker batch. Returns batch statistics."""
+    """Trigger satu batch push-worker secara manual. Balikin statistik batch-nya."""
     from backend.app.core.container import push_worker
     stats = push_worker.run_once()
     return jsonify({"ok": True, "stats": stats})
@@ -351,11 +351,11 @@ def trigger_push_worker():
 @inspection_blueprint.get("/inspections/push-worker/status")
 @require_roles(UserRole.ADMIN)
 def push_worker_status():
-    """Return counts of results per push_status."""
+    """Balikin jumlah hasil per push_status."""
     from backend.app.repositories.inspection_results_repository import InspectionResultsRepository
     local_repo = inspection_results_repo._local_repo  # noqa: SLF001
     if not isinstance(local_repo, InspectionResultsRepository):
-        return jsonify({"error": "Status only available for local repo"}), 400
+        return jsonify({"error": "Status cuma tersedia untuk repo lokal"}), 400
     all_items = local_repo.list_results(limit=100_000, offset=0)
     counts: dict[str, int] = {}
     for item in all_items:
@@ -373,7 +373,7 @@ def export_inspections():
             if request.args.get("template_version_id") else None
         )
     except (ValueError, TypeError):
-        return jsonify({"error": "template_version_id must be an integer"}), 400
+        return jsonify({"error": "template_version_id harus berupa angka"}), 400
     items = inspection_results_repo.list_results(
         line_id=request.args.get("line_id") or None,
         station_id=request.args.get("station_id") or None,
@@ -406,7 +406,10 @@ def export_inspections():
 @inspection_blueprint.get("/inspection/plc/status")
 @require_roles(UserRole.ADMIN, UserRole.OPERATOR)
 def plc_status():
-    """Return the current PLC worker status (running, queue size, last command)."""
+    """Balikin status PLC worker saat ini (running, ukuran antrian, command terakhir)."""
     if plc_worker is None:
+        # String "PLC worker is disabled" TIDAK BOLEH diterjemahkan — client
+        # (operator/view.py::_friendly_error) mencocokkan substring ini persis
+        # untuk menampilkan pesan ramah "PLC tidak aktif...".
         return jsonify({"enabled": False, "note": "PLC worker is disabled (QC_SUITE_PLC_ENABLED=0)"})
     return jsonify({"enabled": True, **plc_worker.status()})

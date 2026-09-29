@@ -207,21 +207,21 @@ class ApiClient:
         )
 
     def get_part_ready_ref_preview(self, template_id: int) -> dict:
-        """Fetch the currently saved reference edge-map (base64 PNG), if any."""
+        """Ambil edge-map referensi yang sudah tersimpan (base64 PNG), kalau ada."""
         return self._get(f"/templates/{template_id}/part-ready-ref")
 
     def upload_part_ready_ref(
         self, template_id: int, file_path: str,
         canny_low: int | None = None, canny_high: int | None = None,
     ) -> dict:
-        """Upload reference patch image."""
+        """Upload gambar patch referensi."""
         import mimetypes
         from pathlib import Path
         path = Path(file_path)
         content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         with path.open("rb") as fh:
             if self._local_mode:
-                # Local mode: read file and send as payload
+                # Mode local: baca file dan kirim sebagai payload
                 file_bytes = fh.read()
                 import base64
                 return self._post(
@@ -287,10 +287,10 @@ class ApiClient:
         user_id: int | None = None,
         response_mode: str | None = None,
     ) -> dict:
-        """Local-mode fast path: call process_frame_decoded directly, bypassing encode/HTTP.
+        """Fast path mode-local: panggil process_frame_decoded langsung, lewati encode/HTTP.
 
-        Only valid when _local_mode is True. Falls back to push_frame (with re-encode)
-        if something goes wrong importing the backend service.
+        Cuma valid kalau _local_mode True. Fallback ke push_frame (dengan re-encode)
+        kalau ada yang salah saat import service backend.
         """
         from backend.app.core.container import inspection_session_service
 
@@ -306,7 +306,7 @@ class ApiClient:
         return self._get("/inspections", params)
 
     def export_inspections_csv(self, params: dict | None = None) -> str:
-        """Return raw CSV text from the server export endpoint."""
+        """Return teks CSV mentah dari endpoint export server."""
         if self._local_mode:
             response = self._local_request("GET", "/inspections/export", params=params or {})
             if not (200 <= response.status_code < 400):
@@ -388,7 +388,7 @@ class ApiClient:
         skip_validation: bool = False,
         force_rename: bool = False,
     ) -> dict:
-        """Import a model package (.zip). Files land in data/models/<name>/ on the backend."""
+        """Import paket model (.zip). File mendarat di data/models/<name>/ di backend."""
         archive_bytes = Path(archive_path).read_bytes()
         payload = {
             "content_b64": base64.b64encode(archive_bytes).decode("ascii"),
@@ -415,7 +415,7 @@ class ApiClient:
         return self._request_json("DELETE", f"/models/{model_id}", params=params, timeout=20)
 
     # ------------------------------------------------------------------
-    # Template lifecycle
+    # Lifecycle template
     # ------------------------------------------------------------------
 
     def list_template_versions(self, template_id: int) -> list[dict]:
@@ -431,7 +431,7 @@ class ApiClient:
         return self._post(f"/deployments/{deployment_id}/rollback", {})
 
     # ------------------------------------------------------------------
-    # User management extras
+    # Manajemen user tambahan
     # ------------------------------------------------------------------
 
     def change_user_role(self, user_id: int, role: str) -> dict:
@@ -450,11 +450,11 @@ class ApiClient:
         return self._get("/auth/audit-log", params)
 
     # ------------------------------------------------------------------
-    # Workstation heartbeat
+    # Heartbeat workstation
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # PLC / Remote-IO control
+    # Kontrol PLC / Remote-IO
     # ------------------------------------------------------------------
 
     def plc_status(self) -> dict:
@@ -479,7 +479,7 @@ class ApiClient:
         return self._delete(f"/workstations/{safe_id}")
 
     # ------------------------------------------------------------------
-    # Machine / PLC Settings
+    # Pengaturan Machine / PLC
     # ------------------------------------------------------------------
 
     def get_machine_settings(self) -> dict:

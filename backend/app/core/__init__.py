@@ -1,1 +1,1 @@
-"""Core application utilities for the qc-suite backend."""
+"""Utilitas inti aplikasi untuk backend qc-suite."""

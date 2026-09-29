@@ -1,14 +1,14 @@
-"""Machine Settings API — CRUD + PLC diagnostics.
+"""API Machine Settings — CRUD + diagnostik PLC.
 
-GET  /machine-settings                  → current settings (+ restart_required)
-PUT  /machine-settings                  → persist + live-apply (admin)
-GET  /machine-settings/plc/diagnostics  → live PLC status + input snapshot
-POST /machine-settings/plc/test-coil    → pulse a coil for wiring test (admin)
-POST /machine-settings/plc/all-off      → emergency all coils off (admin)
+GET  /machine-settings                  → settings saat ini (+ restart_required)
+PUT  /machine-settings                  → simpan + terapkan langsung (admin)
+GET  /machine-settings/plc/diagnostics  → status PLC live + snapshot input
+POST /machine-settings/plc/test-coil    → pulse coil untuk test wiring (admin)
+POST /machine-settings/plc/all-off      → matikan semua coil darurat (admin)
 
-`machine_settings.json` is the only source for these values (nothing comes from
-`.env`). `io` and `timing` are applied live; `connection` and `inference` need a
-backend restart — the response says so via `restart_required`.
+`machine_settings.json` adalah satu-satunya sumber untuk nilai-nilai ini (tidak
+ada yang dari `.env`). `io` dan `timing` diterapkan langsung; `connection` dan
+`inference` butuh restart backend — response memberitahu ini lewat `restart_required`.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 machine_settings_blueprint = Blueprint("machine_settings", __name__, url_prefix="/machine-settings")
 
-# Inference section as it was applied at boot (for restart_required).
+# Bagian inference sebagaimana diterapkan saat boot (untuk restart_required).
 _boot_inference = InferenceConfig(
     mode=app_config.sticker_inference_mode,
     device=app_config.device_mode,
@@ -63,14 +63,14 @@ def get_machine_settings():
 @machine_settings_blueprint.put("")
 @require_roles(UserRole.ADMIN)
 def update_machine_settings():
-    """Persist the full settings object and live-apply what can be applied."""
+    """Simpan seluruh object settings dan terapkan langsung apa yang bisa."""
     payload = request.get_json(force=True) or {}
     try:
         new_settings = MachineSettings.from_dict(payload)
         machine_settings_repo.save_settings(new_settings)
         logger.info("[machine-settings] updated by user %s", g.current_user.username)
     except (TypeError, ValueError, KeyError) as exc:
-        return jsonify({"error": f"Invalid settings: {exc}"}), 400
+        return jsonify({"error": f"Settings tidak valid: {exc}"}), 400
 
     if plc_worker is not None:
         try:
@@ -91,13 +91,15 @@ def update_machine_settings():
     return jsonify(_response(new_settings))
 
 
-# ── PLC Diagnostics ─────────────────────────────────────────────────
+# ── Diagnostik PLC ─────────────────────────────────────────────────
 
 @machine_settings_blueprint.get("/plc/diagnostics")
 @require_roles(UserRole.ADMIN)
 def plc_diagnostics():
-    """Return live PLC status including input snapshot."""
+    """Balikin status PLC live termasuk snapshot input."""
     if plc_worker is None:
+        # "PLC worker is disabled" TIDAK BOLEH diterjemahkan — dicocokkan
+        # persis oleh client (operator/view.py::_friendly_error).
         return jsonify({"enabled": False, "note": "PLC worker is disabled"})
     return jsonify({"enabled": True, **plc_worker.status()})
 
@@ -105,10 +107,10 @@ def plc_diagnostics():
 @machine_settings_blueprint.post("/plc/test-coil")
 @require_roles(UserRole.ADMIN)
 def plc_test_coil():
-    """Pulse a coil for wiring verification.
+    """Pulse satu coil untuk verifikasi wiring.
 
     Body: { "address": 0, "duration_ms": 500 }
-    Safety: only works when dry_run=True or explicitly confirmed.
+    Keamanan: cuma jalan kalau dry_run=True atau sudah dikonfirmasi eksplisit.
     """
     if plc_worker is None:
         return jsonify({"error": "PLC worker is disabled"}), 400
@@ -121,7 +123,7 @@ def plc_test_coil():
     status = plc_worker.status()
     if not status.get("dry_run") and not confirm:
         return jsonify({
-            "error": "dry_run is False. This will fire a real coil. Pass confirm=yes to proceed.",
+            "error": "dry_run is False. Ini akan menyalakan coil sungguhan. Kirim confirm=yes untuk lanjut.",
             "dry_run": False,
         }), 400
 
@@ -142,7 +144,7 @@ def plc_test_coil():
 @machine_settings_blueprint.post("/plc/all-off")
 @require_roles(UserRole.ADMIN)
 def plc_all_off():
-    """Emergency: turn off all coils."""
+    """Darurat: matikan semua coil."""
     if plc_worker is None:
         return jsonify({"error": "PLC worker is disabled"}), 400
     try:

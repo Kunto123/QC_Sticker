@@ -26,9 +26,10 @@ try:
     from fxplc.client.FXPLCClient import FXPLCClient
     from fxplc.transports.TransportSerial import TransportSerial
 except ImportError:
-    # Catch ImportError (not just ModuleNotFoundError) so a partial/namespace
-    # install or a missing fxplc dependency (e.g. pyserial) degrades gracefully
-    # instead of crashing app startup. The FX adapter raises a clear error on use.
+    # Tangkap ImportError (bukan cuma ModuleNotFoundError) supaya install
+    # partial/namespace atau dependency fxplc yang hilang (mis. pyserial)
+    # degradasi dengan aman, tidak crash saat app startup. Adapter FX
+    # melempar error yang jelas saat dipakai.
     FXPLCClient = None  # type: ignore[assignment]
     TransportSerial = None  # type: ignore[assignment]
 
@@ -133,9 +134,9 @@ class ModbusRtuPlcAdapter(PlcAdapter):
 
     def write_coil(self, address: int, value: bool) -> None:
         self._ensure_connected()
-        # Drain stale bytes from serial buffer before sending new command.
-        # Prevents recv-buffer spam when polling at 100ms and response hasn't
-        # fully arrived before the next write.
+        # Kuras byte lama dari buffer serial sebelum kirim command baru.
+        # Mencegah spam recv-buffer saat polling di 100ms dan respons belum
+        # sepenuhnya tiba sebelum write berikutnya.
         try:
             if hasattr(self._client, 'socket') and self._client.socket:
                 self._client.socket.reset_input_buffer()
@@ -157,7 +158,7 @@ class ModbusRtuPlcAdapter(PlcAdapter):
             if resp.isError():
                 raise RuntimeError(f"[plc-modbus-rtu] read_inputs error: {resp}")
         except Exception:
-            # Item 1: close client so worker's connect() actually reconnects
+            # Item 1: tutup client supaya connect() worker benar-benar reconnect
             try:
                 self._client.close()
             except Exception:
@@ -228,7 +229,7 @@ class ModbusTcpPlcAdapter(PlcAdapter):
             if resp.isError():
                 raise RuntimeError(f"[plc-modbus-tcp] read_inputs error: {resp}")
         except Exception:
-            # Item 1: close client so worker's connect() actually reconnects
+            # Item 1: tutup client supaya connect() worker benar-benar reconnect
             try:
                 self._client.close()
             except Exception:
@@ -238,11 +239,11 @@ class ModbusTcpPlcAdapter(PlcAdapter):
 
 
 class FXComputerLinkPlcAdapter(PlcAdapter):
-    """FX Computer Link (fxplc) adapter — bridge async fxplc to sync PlcAdapter.
+    """Adapter FX Computer Link (fxplc) — jembatan fxplc async ke PlcAdapter sync.
 
-    Uses a dedicated event loop on its own thread + persistent connection.
-    All calls are serialized through the single loop thread, matching the
-    single-threaded PLC worker: no race conditions.
+    Pakai event loop khusus di thread sendiri + koneksi persisten. Semua
+    pemanggilan diserialisasi lewat satu thread loop, sesuai dengan PLC
+    worker yang single-threaded: tidak ada race condition.
     """
 
     def __init__(
@@ -262,21 +263,21 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._loop_thread: threading.Thread | None = None
         self._client: FXPLCClient | None = None
-        self._transport = None  # TransportSerial — kept so we can close the serial port
+        self._transport = None  # TransportSerial — disimpan supaya bisa tutup serial port
         self._connected: bool = False
-        self._last_known_inputs: list[bool] = []  # hold last-good for sub-threshold blips
+        self._last_known_inputs: list[bool] = []  # simpan last-good untuk blip sub-threshold
         self._lock = threading.Lock()
 
     def connect(self) -> None:
-        """Start the event loop thread and open serial connection.
+        """Mulai thread event loop dan buka koneksi serial.
 
-        Safe to call again after a failed connect (e.g. wrong/unplugged COM port):
-        the event loop is reused instead of leaking a new thread each retry.
+        Aman dipanggil lagi setelah connect gagal (mis. COM port salah/tercabut):
+        event loop dipakai ulang, bukan bocor thread baru tiap retry.
         """
         with self._lock:
             if self._connected and self._client is not None:
                 return
-            # Reuse a still-running loop; only start one if needed.
+            # Pakai ulang loop yang masih jalan; cuma start satu kalau perlu.
             if self._loop is None or self._loop.is_closed():
                 self._loop = asyncio.new_event_loop()
                 self._loop_thread = threading.Thread(
@@ -286,17 +287,17 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
                 )
                 self._loop_thread.start()
             try:
-                # TransportSerial + FXPLCClient are SYNC constructors (pyserial opens
-                # the port in __init__). They must NOT go through _run_sync (which
-                # expects a coroutine). The event loop is only used for the async
-                # read_bit/write_bit calls later.
+                # TransportSerial + FXPLCClient adalah konstruktor SYNC (pyserial
+                # buka port di __init__). Keduanya TIDAK BOLEH lewat _run_sync
+                # (yang mengharapkan coroutine). Event loop cuma dipakai untuk
+                # pemanggilan async read_bit/write_bit belakangan.
                 self._transport = TransportSerial(
                     self._port, baudrate=self._baudrate, timeout=self._timeout
                 )
                 self._client = FXPLCClient(self._transport)
             except Exception:
-                # Close any half-opened serial handle so the port is freed and the
-                # next connect() doesn't hit "Access is denied" on its own leak.
+                # Tutup handle serial yang setengah-terbuka supaya port bebas dan
+                # connect() berikutnya tidak kena "Access is denied" akibat bocor sendiri.
                 self._close_transport_quietly()
                 self._client = None
                 self._connected = False
@@ -310,12 +311,12 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
             )
 
     def disconnect(self) -> None:
-        """Close serial connection and stop the event loop thread."""
+        """Tutup koneksi serial dan hentikan thread event loop."""
         with self._lock:
             self._client = None
             self._close_transport_quietly()
             self._connected = False
-            self._last_known_inputs = []  # clear on disconnect
+            self._last_known_inputs = []  # kosongkan saat disconnect
             if self._loop is not None:
                 self._loop.call_soon_threadsafe(self._loop.stop)
             if self._loop_thread is not None:
@@ -330,14 +331,14 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
         return self._connected and self._client is not None
 
     def _ensure_connected(self) -> None:
-        """Lazily (re)connect on demand. Raises the REAL underlying serial error
-        (port busy / access denied / not found) instead of a generic 'not connected',
-        so failures surfaced via test-coil / writes are actionable."""
+        """(Re)connect lazy sesuai kebutuhan. Melempar error serial ASLI di bawahnya
+        (port sibuk / akses ditolak / tidak ketemu) daripada 'not connected' generik,
+        supaya kegagalan yang muncul lewat test-coil / write bisa ditindaklanjuti."""
         if self._client is not None:
             return
-        self.connect()  # may raise the underlying serial error
+        self.connect()  # bisa melempar error serial di bawahnya
         if self._client is None:
-            raise RuntimeError(f"[plc-fx] not connected (port={self._port})")
+            raise RuntimeError(f"[plc-fx] tidak terhubung (port={self._port})")
 
     def write_coil(self, address: int, value: bool) -> None:
         self._ensure_connected()
@@ -345,7 +346,7 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
         try:
             self._run_sync(self._client.write_bit(fx_label, bool(value)))
         except Exception:
-            # Item 1: reset connection state so worker's connect() actually reopens
+            # Item 1: reset connection state supaya connect() worker benar-benar buka ulang
             self._connected = False
             self._client = None
             self._close_transport_quietly()
@@ -360,44 +361,44 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
         self._ensure_connected()
         result: list[bool] = []
         consecutive_fail = 0
-        max_bit_failures = 3  # raise after K consecutive bit read failures
+        max_bit_failures = 3  # lempar error setelah K kegagalan read bit berturutan
         for i in range(address, address + count):
             fx_label = f"X{format(i, 'o')}"
             try:
                 bit = self._run_sync(self._client.read_bit(fx_label))
                 result.append(bool(bit))
-                consecutive_fail = 0  # reset on success
+                consecutive_fail = 0  # reset kalau berhasil
             except Exception as exc:
                 consecutive_fail += 1
                 logger.warning(
                     "[plc-fx] read_bit %s failed (%d/%d): %r",
                     fx_label, consecutive_fail, max_bit_failures, exc,
                 )
-                # If the very first read fails and we reset, don't bother
-                # reading the rest — likely a device-level failure.
+                # Kalau read pertama langsung gagal, tidak usah lanjut baca
+                # yang lain — kemungkinan kegagalan di level device.
                 if consecutive_fail == 1 and i == address:
-                    # Immediately stop trying more bits — the transport is dead
+                    # Langsung berhenti coba bit lain — transport-nya mati
                     consecutive_fail = max_bit_failures
                 if consecutive_fail >= max_bit_failures:
-                    # Item 1: reset connection state so worker's connect() actually reopens
+                    # Item 1: reset connection state supaya connect() worker benar-benar buka ulang
                     self._connected = False
                     self._client = None
                     self._close_transport_quietly()
                     raise RuntimeError(
-                        f"[plc-fx] {consecutive_fail} consecutive read failures — "
-                        f"serial link may be degraded"
+                        f"[plc-fx] {consecutive_fail} kegagalan read berturutan — "
+                        f"koneksi serial mungkin bermasalah"
                     ) from exc
-                # Sub-threshold: hold last-known-good instead of False
+                # Sub-threshold: pakai last-known-good, bukan False
                 if i < len(self._last_known_inputs):
                     result.append(self._last_known_inputs[i])
                 else:
                     result.append(False)
-        # Update last-known-good on successful read
+        # Update last-known-good setelah read berhasil
         self._last_known_inputs = list(result)
         return result
 
     def all_off(self, num_channels: int = 4) -> None:
-        """Turn off Y0..Ynum_channels-1."""
+        """Matikan Y0..Ynum_channels-1."""
         for i in range(num_channels):
             try:
                 self.write_coil(i, False)
@@ -413,10 +414,10 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
             "port": self._port,
         }
 
-    # ── Internal helpers ──────────────────────────────────────────────
+    # ── Helper internal ──────────────────────────────────────────────
 
     def _close_transport_quietly(self) -> None:
-        """Close the serial transport if open, swallowing errors. Releases COM port."""
+        """Tutup transport serial kalau masih terbuka, telan errornya. Membebaskan COM port."""
         t = self._transport
         self._transport = None
         if t is None:
@@ -429,7 +430,7 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
                     return
                 except Exception:
                     pass
-        # Fallback: close the underlying pyserial object if exposed.
+        # Fallback: tutup objek pyserial di baliknya kalau terekspos.
         for attr in ("_serial", "serial", "ser"):
             s = getattr(t, attr, None)
             if s is not None and hasattr(s, "close"):
@@ -439,17 +440,17 @@ class FXComputerLinkPlcAdapter(PlcAdapter):
                     pass
 
     def _run_sync(self, coro):
-        """Submit a coroutine to the dedicated loop and block until done."""
+        """Kirim satu coroutine ke loop khusus dan blok sampai selesai."""
         if self._loop is None or self._loop.is_closed():
-            raise RuntimeError("[plc-fx] event loop is not running")
+            raise RuntimeError("[plc-fx] event loop tidak berjalan")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result(timeout=max(self._timeout, 5.0))
 
 
 def build_plc_adapter(conn) -> PlcAdapter:
-    """Factory: pick the adapter from MachineSettings.connection (PlcConnectionConfig).
+    """Factory: pilih adapter dari MachineSettings.connection (PlcConnectionConfig).
 
-    dry_run → DryRun; transport "fx" / "rtu" / "tcp"; anything else degrades to DryRun.
+    dry_run → DryRun; transport "fx" / "rtu" / "tcp"; selain itu degradasi ke DryRun.
     """
     if conn.dry_run:
         return DryRunPlcAdapter()

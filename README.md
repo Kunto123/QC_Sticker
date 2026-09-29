@@ -1,20 +1,20 @@
 # QC Suite Python
 
-Greenfield QC suite in a separate folder, built as:
+QC suite greenfield di folder terpisah, dibangun sebagai:
 
-- `backend/`: Flask API for auth, templates, deployments, inspection sessions, workstation, and dashboard
-- `client_tk/`: Tkinter desktop shell with role-based screens for Operator and Admin
-- `shared/`: contracts and enums shared across backend and client
-- `scripts/`: run and smoke-test helpers
+- `backend/`: Flask API untuk auth, templates, deployments, inspection sessions, workstation, dan dashboard
+- `client_tk/`: shell desktop Tkinter dengan screen berbasis role untuk Operator dan Admin
+- `shared/`: contracts dan enums yang dipakai bersama backend dan client
+- `scripts/`: helper untuk menjalankan dan smoke-test
 
-Default runtime is local-first desktop: the client uses the embedded local transport by default, and split deployment is only needed for compatibility or remote access.
+Runtime default adalah desktop local-first: client memakai transport lokal embedded secara default, dan split deployment hanya diperlukan untuk kompatibilitas atau akses remote.
 
-No default users are seeded. On `postgresql`/`sqlserver` backends, accounts live in the factory's own `operator` table (see `deploy/.env.example`); on the `local` backend, create the first user directly in `data/json_store/users.json` or via another already-authenticated admin session.
+Tidak ada user default yang di-seed. Pada backend `postgresql`/`sqlserver`, akun ada di tabel `operator` milik pabrik (lihat `deploy/.env.example`); pada backend `local`, buat user pertama langsung di `data/json_store/users.json` atau lewat session admin lain yang sudah login.
 
-## Role Screens
+## Role Screen
 
-- `Operator`: login, local camera, active deployment lookup, ROI update, live decision, DB write status
-- `Admin`: templates, deployments, users, inspection results, dashboard, model registry (import zip / upload / export / delete), machine settings. Training is done in other software — this app only imports finished models.
+- `Operator`: login, kamera lokal, lookup deployment aktif, update ROI, keputusan live, status write DB
+- `Admin`: templates, deployments, users, hasil inspeksi, dashboard, registry model (import zip / upload / export / delete), machine settings. Training dilakukan di software lain — app ini hanya mengimpor model yang sudah jadi.
 
 ## Cara Menjalankan
 
@@ -272,16 +272,16 @@ Setelah backend dan client aktif:
 - buka screen `Operator`, load deployment, lalu start camera
 - pastikan frame dari client bisa diproses backend server
 
-## Notes
+## Catatan
 
-- Existing runtime in the repo is untouched.
-- This project uses JSON/file storage by default, with optional PostgreSQL or SQL Server persistence selected via `QC_SUITE_DATABASE_BACKEND`.
-- `local` is the default backend for desktop-only use, `postgresql` is the recommended relational backend for new deployments, and `sqlserver` is retained for compatibility.
-- Inference mode is set in Machine Settings → Inference:
-  - `auto`: pick the backend from the model file extension (Ultralytics / ONNX / OpenVINO / TFLite), fallback to classic contour inference
-  - `ultralytics`: require the YOLO runtime and fail if unavailable
-  - `classic`: deterministic fallback for smoke tests and local debugging
+- Runtime yang sudah ada di repo tidak disentuh.
+- Project ini memakai penyimpanan JSON/file secara default, dengan opsi persistence PostgreSQL atau SQL Server lewat `QC_SUITE_DATABASE_BACKEND`.
+- `local` adalah backend default untuk pemakaian desktop-only, `postgresql` adalah backend relasional yang direkomendasikan untuk deployment baru, dan `sqlserver` dipertahankan untuk kompatibilitas.
+- Mode inferensi diatur di Machine Settings → Inference:
+  - `auto`: pilih backend dari ekstensi file model (Ultralytics / ONNX / OpenVINO / TFLite), fallback ke inferensi contour classic
+  - `ultralytics`: wajib pakai runtime YOLO dan gagal kalau tidak tersedia
+  - `classic`: fallback deterministik untuk smoke test dan debugging lokal
 - **Import model** (Admin → Models → *Import Model Archive (.zip)*): zip berisi satu model — folder hasil export OpenVINO dari Ultralytics (`<nama>_openvino_model/` dengan `.xml` + `.bin` + `metadata.yaml`), `.pt`, `.onnx`, `.tflite`, atau hasil *Export* dari aplikasi ini. Model otomatis masuk ke `data/models/<nama>/` beserta `<nama>.meta.json` (class names diambil dari `metadata.yaml`); tanpa `metadata.yaml` import tetap jalan tapi label deteksi jadi angka. *Export* menyimpan zip yang bisa di-import lagi di PC lain.
-- The only validation mode is QC Sticker (presence / class / position). `WRONG_TYPE` is the only terminal reject; everything else keeps inferring until ACCEPT or `COMMIT_TIMEOUT`.
-- Dashboard summary and time buckets now aggregate persisted Phase 5 fields, including `station_id`, `sticker_backend`, `total_part_ready`, `avg_sticker_confidence`, and `avg_part_ready_match_ratio`.
-- `GET /deployments/active` returns `{ "deployment": ... }` so the client can distinguish between no deployment and a valid deployment deterministically.
+- Satu-satunya mode validasi adalah QC Sticker (presence / class / position). `WRONG_TYPE` adalah satu-satunya reject terminal; selain itu inferensi terus berjalan sampai ACCEPT atau `COMMIT_TIMEOUT`.
+- Dashboard summary dan time bucket sekarang mengagregasi field Phase 5 yang tersimpan, termasuk `station_id`, `sticker_backend`, `total_part_ready`, `avg_sticker_confidence`, dan `avg_part_ready_match_ratio`.
+- `GET /deployments/active` mengembalikan `{ "deployment": ... }` supaya client bisa membedakan antara tidak ada deployment dan deployment yang valid secara deterministik.

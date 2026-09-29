@@ -1,4 +1,4 @@
-"""Operators tab -- user management and RFID bind."""
+"""Tab Operators -- manajemen user dan bind RFID."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -20,7 +20,7 @@ from client_tk.app.theme import (
 
 
 class OperatorsTab:
-    """User management and RFID bind interface."""
+    """Interface manajemen user dan bind RFID."""
 
     def __init__(self, admin: object, tab_frame: tk.Frame) -> None:
         self.admin = admin
@@ -55,7 +55,7 @@ class OperatorsTab:
         )
         ctk.CTkLabel(
             listing,
-            text="Manage operators and admins. Edit role or delete users.",
+            text="Kelola operator dan admin. Ubah role atau hapus user.",
             text_color=TEXT_SECONDARY,
         ).grid(row=1, column=0, sticky="w", padx=12, pady=(2, 8))
         a.users_table = a._build_table(
@@ -87,12 +87,12 @@ class OperatorsTab:
         form.pack(fill="x")
         form.columnconfigure(1, weight=1)
         a.operator_form_title = ctk.CTkLabel(
-            form, text="Add User", font=("Segoe UI", 12, "bold"), text_color=TEXT_PRIMARY
+            form, text="Tambah User", font=("Segoe UI", 12, "bold"), text_color=TEXT_PRIMARY
         )
         a.operator_form_title.grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 0))
         a.operator_form_hint = ctk.CTkLabel(
             form,
-            text="Create a new user, then bind RFID below.",
+            text="Buat user baru, lalu bind RFID di bawah.",
             text_color=TEXT_SECONDARY,
             wraplength=420,
             justify="left",
@@ -111,8 +111,8 @@ class OperatorsTab:
         a._entry(form, 4, 0, "MC_ID", a.operator_mc_id_var, columns=2)
         ctk.CTkLabel(
             form,
-            text="Which machine/station this operator works at. Set login credential "
-                 "(RFID) below in Bind RFID — there is no separate password.",
+            text="Mesin/station tempat operator ini bekerja. Set kredensial login "
+                 "(RFID) di bawah lewat Bind RFID — tidak ada password terpisah.",
             text_color=TEXT_SECONDARY,
             font=("Segoe UI", 9),
             wraplength=420,
@@ -122,7 +122,7 @@ class OperatorsTab:
         btn_row.grid(row=6, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 10))
         a.operator_save_btn = ctk.CTkButton(
             btn_row,
-            text="Create User",
+            text="Buat User",
             command=a._on_save_user,
             fg_color=ACCENT,
             hover_color=ACCENT_HOVER,
@@ -133,7 +133,7 @@ class OperatorsTab:
         a.operator_save_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
         a.operator_cancel_btn = ctk.CTkButton(
             btn_row,
-            text="Cancel Edit",
+            text="Batal Edit",
             command=a._on_cancel_edit,
             fg_color="#475569",
             hover_color="#64748b",
@@ -144,7 +144,7 @@ class OperatorsTab:
         a.operator_cancel_btn.pack(side="left", fill="x", expand=True, padx=(6, 0))
         a.operator_delete_btn = ctk.CTkButton(
             form,
-            text="Delete User",
+            text="Hapus User",
             command=a._on_delete_user,
             fg_color="#991b1b",
             hover_color="#7f1d1d",
@@ -163,14 +163,14 @@ class OperatorsTab:
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 0))
         ctk.CTkLabel(
             bind_frame,
-            text="Select a user from the list, scan RFID, then click Bind.",
+            text="Pilih user dari daftar, scan RFID, lalu klik Bind.",
             text_color=TEXT_SECONDARY,
             wraplength=420,
             justify="left",
         ).grid(row=1, column=0, columnspan=2, sticky="w", padx=12, pady=(2, 8))
         a.bind_target_label = ctk.CTkLabel(
             bind_frame,
-            text="Select a user from the list",
+            text="Pilih user dari daftar",
             text_color=TEXT_SECONDARY,
             font=("Segoe UI", 10),
         )
@@ -196,7 +196,7 @@ class OperatorsTab:
         a.bind_rfid_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
         a.clear_rfid_btn = ctk.CTkButton(
             bind_btn_row,
-            text="Clear RFID",
+            text="Hapus RFID",
             command=a._on_clear_rfid,
             fg_color="#475569",
             hover_color="#64748b",

@@ -31,7 +31,7 @@ class LiveView(ctk.CTkFrame):
         self._title.pack(fill="x", padx=12, pady=(10, 0))
         self._label = ctk.CTkLabel(
             self,
-            text="No frame",
+            text="Belum ada frame",
             fg_color="#0f172a",
             text_color=TEXT_SECONDARY,
             anchor="center",
@@ -84,7 +84,7 @@ class LiveView(ctk.CTkFrame):
         image = Image.fromarray(rgb)
         self._photo = ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
         try:
-            # Clear stale tk image handle first so text update does not fail on orphan pyimage refs.
+            # Bersihkan handle image tk yang basi dulu supaya update teks tidak gagal karena orphan pyimage refs.
             if hasattr(self._label, "_label"):
                 self._label._label.configure(image="")
             self._label.configure(image=self._photo)
@@ -100,6 +100,6 @@ class LiveView(ctk.CTkFrame):
         try:
             if hasattr(self._label, "_label"):
                 self._label._label.configure(image="")
-            self._label.configure(image=None, text="No frame", fg_color="#0f172a")
+            self._label.configure(image=None, text="Belum ada frame", fg_color="#0f172a")
         except tk.TclError:
             return

@@ -10,7 +10,7 @@ from backend.app.core.config import MODELS_DIR, PROJECT_ROOT
 from backend.app.repositories.base_json import JsonRepository
 
 # Lifecycle: draft → validated → canary → production → retired
-# Any state → retired; never go backwards (except re-draft after retired)
+# Dari state mana pun → retired; tidak pernah mundur (kecuali re-draft setelah retired)
 _MODEL_TRANSITIONS: dict[str, set[str]] = {
     "draft":      {"validated", "retired"},
     "validated":  {"canary", "draft", "retired"},
@@ -65,7 +65,7 @@ def _load_default_meta(meta_path: str) -> dict[str, Any]:
 
 
 def _default_models_payload(default_model_path: str = "", default_meta_path: str = "") -> dict[str, Any]:
-    """Registry seed used only when models.json does not exist yet."""
+    """Seed registry yang dipakai cuma kalau models.json belum ada."""
     if not default_model_path:
         return {"models": []}
     meta = _load_default_meta(default_meta_path)
@@ -209,7 +209,7 @@ class ModelsRepository(JsonRepository):
         note: str | None = None,
     ) -> dict:
         if new_status not in _ALL_MODEL_STATES:
-            raise ValueError(f"Invalid lifecycle status '{new_status}'. Must be one of: {sorted(_ALL_MODEL_STATES)}")
+            raise ValueError(f"Status lifecycle '{new_status}' tidak valid. Harus salah satu dari: {sorted(_ALL_MODEL_STATES)}")
         payload = self.load()
         for item in payload["models"]:
             if int(item["id"]) != int(model_id):
@@ -218,8 +218,8 @@ class ModelsRepository(JsonRepository):
             allowed = _MODEL_TRANSITIONS.get(current, set())
             if new_status not in allowed:
                 raise ValueError(
-                    f"Cannot transition model {model_id} from '{current}' to '{new_status}'. "
-                    f"Allowed: {sorted(allowed) or 'none'}"
+                    f"Model {model_id} tidak bisa pindah dari '{current}' ke '{new_status}'. "
+                    f"Yang diizinkan: {sorted(allowed) or 'tidak ada'}"
                 )
             now = datetime.now(UTC).isoformat()
             item["lifecycle_status"] = new_status
@@ -233,7 +233,7 @@ class ModelsRepository(JsonRepository):
     def update_model(self, model_id: int, *, name: str) -> dict:
         name = str(name or "").strip()
         if not name:
-            raise ValueError("Model name must not be empty.")
+            raise ValueError("Nama model tidak boleh kosong.")
         payload = self.load()
         for item in payload["models"]:
             if int(item["id"]) != int(model_id):

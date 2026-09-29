@@ -1,4 +1,4 @@
-"""Shared UI widgets for admin tabs."""
+"""Widget UI bersama untuk tab admin."""
 from __future__ import annotations
 
 import customtkinter as ctk

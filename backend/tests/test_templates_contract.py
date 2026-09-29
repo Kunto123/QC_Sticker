@@ -128,11 +128,11 @@ class ValidateStickerRuleTest(unittest.TestCase):
 
     def test_confidence_out_of_range_rejected(self) -> None:
         errors = validate_sticker_rule({"expected_class": "K0W", "min_roi_confidence": 5})
-        self.assertTrue(any("out of range" in e for e in errors))
+        self.assertTrue(any("di luar rentang" in e for e in errors))
 
     def test_confidence_non_float_rejected(self) -> None:
         errors = validate_sticker_rule({"expected_class": "K0W", "min_roi_confidence": "abc"})
-        self.assertTrue(any("must be a float" in e for e in errors))
+        self.assertTrue(any("harus berupa angka desimal" in e for e in errors))
 
 
 if __name__ == "__main__":

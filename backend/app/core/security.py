@@ -35,11 +35,11 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 
 def normalize_rfid_uid(raw_uid: object) -> str:
-    """Normalize RFID keyboard-wedge output into a stable UID string."""
+    """Normalisasi output keyboard-wedge RFID jadi string UID yang stabil."""
     value = str(raw_uid or "").strip()
     normalized = re.sub(r"[\s:\-]", "", value).upper()
     if not _RFID_ALLOWED_PATTERN.fullmatch(normalized):
-        raise ValueError("RFID UID must be 4-64 alphanumeric characters.")
+        raise ValueError("UID RFID harus 4-64 karakter alfanumerik.")
     return normalized
 
 

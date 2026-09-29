@@ -174,7 +174,7 @@ class ApiSmokeTest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400, response.get_json())
         payload = response.get_json() or {}
-        self.assertIn("must be one of", str(payload.get("error") or ""))
+        self.assertIn("harus salah satu dari", str(payload.get("error") or ""))
 
     def test_00e4_admin_cannot_change_role_to_engineer(self) -> None:
         create_response = self.client.post(
@@ -192,7 +192,7 @@ class ApiSmokeTest(unittest.TestCase):
         )
         self.assertEqual(change_response.status_code, 400, change_response.get_json())
         payload = change_response.get_json() or {}
-        self.assertIn("must be one of", str(payload.get("error") or ""))
+        self.assertIn("harus salah satu dari", str(payload.get("error") or ""))
 
     def test_00e5_rfid_binding_login_and_disable_flow(self) -> None:
         username = f"rfid_{uuid4().hex[:8]}"

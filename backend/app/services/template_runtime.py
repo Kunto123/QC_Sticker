@@ -17,7 +17,7 @@ class TemplateRuntimeService:
     def resolve_template_by_version(self, version_id: int) -> InspectionTemplate:
         template = self._templates_repo.get_by_version_id(version_id)
         if not template:
-            raise ValueError("Template version not found.")
+            raise ValueError("Version template tidak ditemukan.")
         return template
 
     def get_active_deployment(self) -> dict | None:

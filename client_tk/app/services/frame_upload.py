@@ -7,15 +7,15 @@ from collections.abc import Callable
 
 import cv2
 
-# Rolling window to compute average request_ms for adaptive quality.
+# Rolling window untuk menghitung rata-rata request_ms untuk adaptive quality.
 _ADAPTIVE_WINDOW = 6
-# If avg request_ms exceeds this threshold, reduce JPEG quality one step.
+# Kalau rata-rata request_ms melebihi threshold ini, turunkan kualitas JPEG satu step.
 _OVERLOAD_THRESHOLD_MS = 200.0
-# If avg request_ms drops below this threshold, restore quality one step.
+# Kalau rata-rata request_ms turun di bawah threshold ini, kembalikan kualitas satu step.
 _RECOVER_THRESHOLD_MS = 100.0
 _QUALITY_STEP = 5
 _QUALITY_MIN = 45
-# Width to auto-downscale to when backend is consistently overloaded.
+# Lebar auto-downscale saat backend konsisten overload.
 _ADAPTIVE_RESIZE_WIDTH = 480
 
 
@@ -64,7 +64,7 @@ class FrameUploadService:
                             time.sleep(sleep_s)
                         continue
 
-                    # Adaptive: kick in auto-resize when backend is overloaded.
+                    # Adaptive: aktifkan auto-resize saat backend overload.
                     effective_resize = current_resize
                     if adaptive and current_resize is None:
                         if (
@@ -90,7 +90,7 @@ class FrameUploadService:
                     encode_ms = (time.perf_counter() - t0) * 1000.0
 
                     if not ok:
-                        raise RuntimeError("Failed to encode frame.")
+                        raise RuntimeError("Gagal encode frame.")
 
                     t0 = time.perf_counter()
                     image_b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
@@ -100,7 +100,7 @@ class FrameUploadService:
                     result = send_frame(image_b64)
                     request_ms = (time.perf_counter() - t0) * 1000.0
 
-                    # Adaptive quality adjustment.
+                    # Penyesuaian kualitas adaptive.
                     if adaptive and not use_png:
                         request_ms_history.append(request_ms)
                         if len(request_ms_history) > _ADAPTIVE_WINDOW:

@@ -1,7 +1,7 @@
-"""Model registry routes (+ workstation heartbeat).
+"""Route registry model (+ heartbeat workstation).
 
-Datasets / annotation / augment / training were removed on 2026-09-18 — training
-happens in other software; this app only imports finished models.
+Dataset / anotasi / augment / training sudah dihapus 2026-09-18 — training
+dilakukan di software lain; app ini cuma import model yang sudah jadi.
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def _truthy(value: str | None) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Models
+# Model
 # ---------------------------------------------------------------------------
 
 @workstation_blueprint.get("/models")
@@ -92,10 +92,10 @@ def export_model(model_id: int):
 @workstation_blueprint.post("/models/upload")
 @require_roles(UserRole.ADMIN)
 def upload_model():
-    """Register a single model file sent as base64 (.pt / .onnx / .tflite / .xml+.bin).
+    """Registrasi satu file model yang dikirim sebagai base64 (.pt / .onnx / .tflite / .xml+.bin).
 
-    The file lands in `data/models/<name>/`; when `class_names` are given a
-    `<stem>.meta.json` is written next to it so the inference backends find them.
+    File-nya masuk ke `data/models/<name>/`; kalau `class_names` diberikan,
+    `<stem>.meta.json` ditulis di sebelahnya supaya inference backend bisa menemukannya.
     """
     payload = request.get_json(force=True) or {}
     name = str(payload.get("name") or "").strip()
@@ -104,24 +104,24 @@ def upload_model():
     class_names_raw = payload.get("class_names") or []
 
     if not name or not content_b64:
-        return jsonify({"error": "name and content_b64 are required"}), 400
+        return jsonify({"error": "name dan content_b64 wajib diisi"}), 400
     if not isinstance(class_names_raw, list):
-        return jsonify({"error": "class_names must be a list"}), 400
+        return jsonify({"error": "class_names harus berupa list"}), 400
     if not file_name or Path(file_name).suffix.lower() not in {".pt", ".onnx", ".tflite", ".xml"}:
-        return jsonify({"error": "file_name must end with .pt, .onnx, .tflite or .xml"}), 400
+        return jsonify({"error": "file_name harus berakhiran .pt, .onnx, .tflite atau .xml"}), 400
     if models_repo.find_by_name(name) is not None:
-        return jsonify({"error": f"A model named '{name}' already exists"}), 409
+        return jsonify({"error": f"Model dengan nama '{name}' sudah ada"}), 409
 
     try:
         content = base64.b64decode(content_b64)
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": f"Invalid base64 content: {exc}"}), 400
+        return jsonify({"error": f"Konten base64 tidak valid: {exc}"}), 400
 
     runtime = str(payload.get("runtime") or "").strip().lower() or runtime_for_path(file_name)
     companion_file_name = Path(str(payload.get("companion_file_name") or "").strip()).name
     companion_b64 = str(payload.get("companion_b64") or "").strip()
     if runtime == "openvino" and not (companion_file_name and companion_b64):
-        return jsonify({"error": "OpenVINO upload needs the .bin companion (companion_file_name + companion_b64)"}), 400
+        return jsonify({"error": "Upload OpenVINO butuh file pendamping .bin (companion_file_name + companion_b64)"}), 400
 
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     dest_dir = MODELS_DIR / _safe_component(name)
@@ -136,7 +136,7 @@ def upload_model():
         try:
             (dest_dir / companion_file_name).write_bytes(base64.b64decode(companion_b64))
         except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": f"Invalid companion file: {exc}"}), 400
+            return jsonify({"error": f"File pendamping tidak valid: {exc}"}), 400
 
     class_names = [str(c) for c in class_names_raw]
     meta_path = write_meta_json(dest, class_names, runtime=runtime, name=name) if class_names else None
@@ -151,14 +151,14 @@ def upload_model():
     )
     warnings = []
     if runtime != "ultralytics" and not class_names:
-        warnings.append("No class names given; detections will carry numeric labels.")
+        warnings.append("Class names tidak diberikan; hasil deteksi akan memakai label angka.")
     return jsonify({**model, "saved_to": str(dest), "warnings": warnings}), 201
 
 
 @workstation_blueprint.post("/models/import")
 @require_roles(UserRole.ADMIN)
 def import_model():
-    """Import a model package (.zip). See ModelExportService.import_model_archive."""
+    """Import paket model (.zip). Lihat ModelExportService.import_model_archive."""
     payload = request.get_json(silent=True) or {}
     form_data = request.form if request.form else None
 
@@ -176,7 +176,7 @@ def import_model():
         if request.files:
             archive_file = request.files.get("zip_file") or request.files.get("file")
             if archive_file is None or not getattr(archive_file, "filename", ""):
-                return jsonify({"error": "zip_file is required"}), 400
+                return jsonify({"error": "zip_file wajib diisi"}), 400
             original_filename = str(archive_file.filename or "").strip() or None
             temp_handle = tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="qc-suite-import-")
             temp_handle.close()
@@ -185,12 +185,12 @@ def import_model():
         else:
             content_b64 = str(payload.get("content_b64") or payload.get("zip_b64") or "").strip()
             if not content_b64:
-                return jsonify({"error": "zip_file or content_b64 is required"}), 400
+                return jsonify({"error": "zip_file atau content_b64 wajib diisi"}), 400
             original_filename = str(payload.get("file_name") or "").strip() or None
             try:
                 content = base64.b64decode(content_b64)
             except Exception as exc:  # noqa: BLE001
-                return jsonify({"error": f"Invalid base64 content: {exc}"}), 400
+                return jsonify({"error": f"Konten base64 tidak valid: {exc}"}), 400
             temp_handle = tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="qc-suite-import-")
             temp_handle.write(content)
             temp_handle.close()
@@ -221,15 +221,15 @@ def import_model():
 @workstation_blueprint.post("/models")
 @require_roles(UserRole.ADMIN)
 def create_model():
-    """Register a model file that is already on disk (no upload)."""
+    """Registrasi file model yang sudah ada di disk (bukan upload)."""
     payload = request.get_json(force=True) or {}
     name = str(payload.get("name") or "").strip()
     path = str(payload.get("path") or "").strip()
     if not name or not path:
-        return jsonify({"error": "name and path are required"}), 400
+        return jsonify({"error": "name dan path wajib diisi"}), 400
     class_names = payload.get("class_names")
     if class_names is not None and not isinstance(class_names, list):
-        return jsonify({"error": "class_names must be a list"}), 400
+        return jsonify({"error": "class_names harus berupa list"}), 400
     return jsonify(
         models_repo.add_model(
             name,
@@ -249,7 +249,7 @@ def transition_model_lifecycle(model_id: int):
     payload = request.get_json(force=True) or {}
     new_status = str(payload.get("status") or "").strip().lower()
     if not new_status:
-        return jsonify({"error": "status is required"}), 400
+        return jsonify({"error": "status wajib diisi"}), 400
     note = str(payload.get("note") or "").strip() or None
     actor = getattr(g, "current_user", None)
     try:
@@ -271,15 +271,15 @@ def transition_model_lifecycle(model_id: int):
 def rename_model(model_id: int):
     payload = request.get_json(force=True) or {}
     if not isinstance(payload, dict):
-        return jsonify({"error": "Request body must be an object"}), 400
+        return jsonify({"error": "Request body harus berupa object"}), 400
     extra_fields = set(payload.keys()) - {"name"}
     if extra_fields:
         return jsonify({
-            "error": f"Only 'name' can be updated. Unexpected field(s): {', '.join(sorted(extra_fields))}"
+            "error": f"Hanya 'name' yang bisa diupdate. Field tak dikenal: {', '.join(sorted(extra_fields))}"
         }), 400
     name = str(payload.get("name") or "").strip()
     if not name:
-        return jsonify({"error": "name must be a non-empty string"}), 400
+        return jsonify({"error": "name harus berupa teks yang tidak kosong"}), 400
     try:
         record = models_repo.update_model(model_id, name=name)
     except ValueError as exc:
@@ -297,7 +297,7 @@ def rename_model(model_id: int):
 def delete_model(model_id: int):
     model = models_repo.get_model(model_id)
     if model is None:
-        return jsonify({"error": "Model not found"}), 404
+        return jsonify({"error": "Model tidak ditemukan"}), 404
 
     conflict = models_repo.find_active_model_conflict(
         str(model.get("path") or ""),
@@ -306,7 +306,7 @@ def delete_model(model_id: int):
     )
     if conflict is not None:
         return jsonify({
-            "error": "Model is referenced by an active deployment",
+            "error": "Model masih dipakai oleh deployment yang aktif",
             "conflict": conflict,
         }), 409
 
@@ -321,12 +321,12 @@ def delete_model(model_id: int):
     purged_files: list[str] = []
     purge_warning: str | None = None
     if purge_files:
-        # release mmap'd weights held by the inference cache before touching files
+        # lepaskan weight yang di-mmap oleh inference cache sebelum menyentuh file
         sticker_inference_service.unload_model(str(removed.get("path") or ""))
         purged_files = purge_model_files(removed)
         leftover = Path(str(removed.get("path") or ""))
         if leftover.exists():
-            purge_warning = f"Registry entry removed but files are still in use and were not deleted: {leftover.parent}"
+            purge_warning = f"Entri registry sudah dihapus tapi file masih dipakai sehingga tidak terhapus: {leftover.parent}"
     return jsonify({
         "deleted": True,
         "id": model_id,
@@ -337,13 +337,13 @@ def delete_model(model_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Workstation registry + heartbeat
+# Registry workstation + heartbeat
 # ---------------------------------------------------------------------------
 
 @workstation_blueprint.get("/workstations")
 @require_roles(UserRole.ADMIN)
 def list_workstations():
-    """List all registered workstations and their last-seen timestamps."""
+    """List semua workstation terdaftar beserta timestamp terakhir terlihat."""
     return jsonify(workstation_registry_repo.list_workstations())
 
 
@@ -352,21 +352,21 @@ def list_workstations():
 def delete_workstation(machine_id: str):
     normalized = str(machine_id or "").strip()
     if not normalized:
-        return jsonify({"error": "machine_id is required"}), 400
+        return jsonify({"error": "machine_id wajib diisi"}), 400
     ok = workstation_registry_repo.delete_workstation(normalized)
     if not ok:
-        return jsonify({"error": "Workstation not found"}), 404
+        return jsonify({"error": "Workstation tidak ditemukan"}), 404
     return jsonify({"deleted": True, "machine_id": normalized})
 
 
 @workstation_blueprint.post("/workstations/heartbeat")
 @require_auth
 def workstation_heartbeat():
-    """Register or update a workstation's identity and trigger stale session cleanup."""
+    """Registrasi atau update identitas workstation, sekalian bersihkan sesi basi."""
     payload = request.get_json(force=True) or {}
     machine_id = str(payload.get("machine_id") or "").strip()
     if not machine_id:
-        return jsonify({"error": "machine_id is required"}), 400
+        return jsonify({"error": "machine_id wajib diisi"}), 400
 
     forwarded_for = str(request.headers.get("X-Forwarded-For") or "").strip()
     ip_address = forwarded_for.split(",", 1)[0].strip() if forwarded_for else (request.remote_addr or "")

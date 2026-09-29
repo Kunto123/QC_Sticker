@@ -20,15 +20,15 @@ _logo_image_ref = None
 LOGO_HEADER_WIDTH = 140  # Lebar logo di header shell, proporsional dengan tombol Start
 
 def _get_logo_image(width: int = LOGO_HEADER_WIDTH):
-    """Load and cache logo image (PNG preferred, SVG fallback via cairosvg)."""
+    """Muat dan cache gambar logo (PNG lebih diutamakan, fallback SVG lewat cairosvg)."""
     global _logo_image_ref
     try:
-        # Try PNG first (most reliable in production)
+        # Coba PNG dulu (paling andal di produksi)
         logo_png = ASSETS_DIR / "aski_logo.png"
         if logo_png.exists():
             img = Image.open(str(logo_png))
         else:
-            # Fallback: SVG via cairosvg
+            # Fallback: SVG lewat cairosvg
             import cairosvg
             png_data = cairosvg.svg2png(url=str(LOGO_PATH), output_width=width)
             img = Image.open(io.BytesIO(png_data))
@@ -81,7 +81,7 @@ class LoginFrame(ctk.CTkFrame):
         card.grid_columnconfigure(0, weight=0)
         card.grid_columnconfigure(1, weight=1)
 
-        # Logo only — no text title
+        # Cuma logo — tanpa judul teks
         logo_img = _get_logo_image(width=64)
         title_frame = ctk.CTkFrame(card, fg_color="transparent")
         title_frame.grid(row=0, column=0, columnspan=2, sticky="w", padx=24, pady=(24, 4))
@@ -90,7 +90,7 @@ class LoginFrame(ctk.CTkFrame):
             logo_label.pack(side="left")
         ctk.CTkLabel(
             card,
-            text="Client desktop interface with a dark navy CustomTkinter shell.",
+            text="Interface desktop client dengan shell CustomTkinter navy gelap.",
             font=("Segoe UI", 11),
             text_color=TEXT_SECONDARY,
         ).grid(row=1, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 20))
@@ -208,15 +208,15 @@ class QcSuiteDesktopApp(ctk.CTk):
 
         header = ctk.CTkFrame(self.shell, fg_color=SHELL_BG, corner_radius=0, border_width=0)
         header.pack(fill="x")
-        # Logo in header
+        # Logo di header
         header_logo = _get_logo_image(width=LOGO_HEADER_WIDTH)
         if header_logo is not None:
             ctk.CTkLabel(header, image=header_logo, text="").pack(side="left", padx=(16, 8), pady=10)
-        self.user_label = ctk.CTkLabel(header, text="Not authenticated", text_color=TEXT_SECONDARY)
+        self.user_label = ctk.CTkLabel(header, text="Belum login", text_color=TEXT_SECONDARY)
         self.user_label.pack(side="left", padx=16)
         self.endpoint_label = ctk.CTkLabel(
             header,
-            text="Embedded local runtime" if self.local_only else DEFAULT_SERVER_URL,
+            text="Runtime lokal embedded" if self.local_only else DEFAULT_SERVER_URL,
             text_color=TEXT_SECONDARY,
         )
         self.endpoint_label.pack(side="left", padx=16)
@@ -280,7 +280,7 @@ class QcSuiteDesktopApp(ctk.CTk):
             self.api.set_token(token)
             user = self.api.me()
         except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("Login failed", str(exc))
+            messagebox.showerror("Login gagal", str(exc))
             return
 
         self.session_state = SessionState(base_url=base_url, token=token, user=user)
@@ -289,12 +289,12 @@ class QcSuiteDesktopApp(ctk.CTk):
     def _mount_screen(self, role: str | None) -> None:
         screen_class = ROLE_SCREEN_MAP.get(str(role or "").strip())
         if screen_class is None:
-            messagebox.showerror("Role", f"Unsupported role: {role}")
+            messagebox.showerror("Role", f"Role tidak didukung: {role}")
             self._show_login()
             return
         self._teardown_screen()
         self.user_label.configure(text=f"{self.session_state.user.get('username')} ({self.session_state.user.get('role')})")
-        endpoint_display = "Embedded local runtime" if self.local_only else self.session_state.base_url
+        endpoint_display = "Runtime lokal embedded" if self.local_only else self.session_state.base_url
         self.endpoint_label.configure(text=endpoint_display)
         self.active_screen = screen_class(self.screen_host, self.api, self.session_state)
         self.active_screen.pack(fill="both", expand=True)
@@ -321,7 +321,7 @@ class QcSuiteDesktopApp(ctk.CTk):
         self._teardown_screen()
         self.api.set_token(None)
         self.session_state = SessionState(base_url=base_url)
-        self.user_label.configure(text="Not authenticated")
+        self.user_label.configure(text="Belum login")
         self.endpoint_label.configure(text=base_url)
         self._show_login()
 
@@ -329,23 +329,23 @@ class QcSuiteDesktopApp(ctk.CTk):
         self._teardown_screen()
         self.destroy()
 
-    # ── Restart (Machine Settings → Connection / Inference changes) ──
+    # ── Restart (perubahan Machine Settings → Connection / Inference) ──
 
     def can_restart_backend(self) -> bool:
-        """True when restarting this process also restarts the backend: embedded
-        local-only mode, or split mode launched by scripts/run_desktop.py (which owns
-        the backend subprocess). A remote backend cannot be restarted from here."""
+        """True kalau restart proses ini juga me-restart backend: mode embedded
+        local-only, atau mode split yang dijalankan lewat scripts/run_desktop.py
+        (yang memegang subprocess backend). Backend remote tidak bisa di-restart dari sini."""
         if self.local_only:
             return True
         return Path(sys.argv[0]).name == "run_desktop.py"
 
     def restart_app(self) -> None:
-        """Shut this process down cleanly and relaunch the same command line.
+        """Matikan proses ini dengan bersih dan jalankan ulang command line yang sama.
 
-        Order matters: release the camera and stop the PLC worker (all coils off,
-        port closed) BEFORE the detached relauncher is spawned, then exit. The
-        relauncher waits until this pid is gone, so in split mode the old backend
-        subprocess is already terminated when the new one binds its port."""
+        Urutan penting: lepas kamera dan hentikan PLC worker (semua coil OFF,
+        port ditutup) SEBELUM relauncher terpisah di-spawn, baru exit. Relauncher
+        menunggu sampai pid ini hilang, jadi di mode split subprocess backend lama
+        sudah berhenti saat yang baru bind ke port-nya."""
         from client_tk.app.services.app_restart import schedule_relaunch
 
         self._teardown_screen()

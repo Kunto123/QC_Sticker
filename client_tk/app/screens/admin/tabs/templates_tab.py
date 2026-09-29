@@ -1,4 +1,4 @@
-"""Templates tab -- preset library, preset wizard, ROI picker, gap reference."""
+"""Tab Templates -- preset library, preset wizard, ROI picker, gap reference."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -11,7 +11,7 @@ from client_tk.app.components.scrollable_frame import ScrollableFrame
 
 
 def _float_or_default(value, default):
-    """Parse a string value to float, returning default if empty or invalid."""
+    """Parse nilai string ke float, return default kalau kosong atau tidak valid."""
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -31,7 +31,7 @@ from client_tk.app.theme import (
 
 
 class TemplatesTab:
-    """Preset library + preset wizard extracted from AdminScreen."""
+    """Preset library + preset wizard yang diekstrak dari AdminScreen."""
 
     def __init__(self, admin, tab_frame):
         self.admin = admin
@@ -39,7 +39,7 @@ class TemplatesTab:
         self._build()
 
     # ------------------------------------------------------------------
-    # Build
+    # Bangun
     def _build(self) -> None:
         a = self.admin
         self.frame.columnconfigure(0, weight=3)
@@ -68,7 +68,7 @@ class TemplatesTab:
         )
         ctk.CTkLabel(
             listing,
-            text="Shows templates and active deployments together; ACTIVE marks deployed records.",
+            text="Menampilkan template dan deployment aktif bersamaan; ACTIVE menandai record yang di-deploy.",
             text_color=TEXT_SECONDARY,
         ).grid(row=1, column=0, sticky="w", padx=12, pady=(2, 8))
 
@@ -89,8 +89,8 @@ class TemplatesTab:
             listing,
             [
                 ("Refresh", a.refresh_presets, "neutral", "left"),
-                ("New Preset", a.reset_preset_wizard, "neutral", "right"),
-                ("Delete/Deactivate Selected", a.deactivate_selected_preset, "neutral", "right"),
+                ("Preset Baru", a.reset_preset_wizard, "neutral", "right"),
+                ("Hapus/Nonaktifkan Terpilih", a.deactivate_selected_preset, "neutral", "right"),
             ],
         )
         footer.grid(row=3, column=0, sticky="ew", padx=12, pady=(8, 10))
@@ -106,14 +106,14 @@ class TemplatesTab:
         )
         ctk.CTkLabel(
             wizard,
-            text="Fill only production-critical values. Technical defaults are applied automatically.",
+            text="Isi cuma nilai yang kritis untuk produksi. Default teknis diterapkan otomatis.",
             text_color=TEXT_SECONDARY, wraplength=520, justify="left",
         ).grid(row=1, column=0, columnspan=4, sticky="w", padx=12, pady=(2, 10))
 
-        a._entry(wizard, 3, 0, "Preset Name", a.preset_name_var, columnspan=3)
-        a._entry(wizard, 4, 0, "Description", a.preset_description_var, columnspan=3)
+        a._entry(wizard, 3, 0, "Nama Preset", a.preset_name_var, columnspan=3)
+        a._entry(wizard, 4, 0, "Deskripsi", a.preset_description_var, columnspan=3)
 
-        a._entry(wizard, 5, 0, "Camera Index", a.preset_camera_index_var, columnspan=1)
+        a._entry(wizard, 5, 0, "Index Kamera", a.preset_camera_index_var, columnspan=1)
 
         ttk.Label(wizard, text="Model").grid(row=6, column=0, sticky="w", padx=(12, 8), pady=5)
         a.preset_model_selector = ttk.Combobox(wizard, textvariable=a.preset_model_choice_var, state="readonly")
@@ -129,9 +129,9 @@ class TemplatesTab:
             state="readonly",
         )
         runtime_combo.grid(row=7, column=1, columnspan=3, sticky="w", padx=(0, 12), pady=5)
-        a._entry(wizard, 8, 0, "Confidence Threshold", a.preset_conf_threshold_var, columnspan=3)
+        a._entry(wizard, 8, 0, "Threshold Confidence", a.preset_conf_threshold_var, columnspan=3)
 
-        # Mean-Std threshold variables (initialized lazily on first method change)
+        # Variabel threshold Mean-Std (di-init lazy saat method pertama kali diubah)
         a.preset_mean_max_var = tk.StringVar(value="105.0")
         a.preset_std_max_var = tk.StringVar(value="35.0")
         a.preset_min_match_ratio_var = tk.StringVar(value="0.5")
@@ -139,7 +139,7 @@ class TemplatesTab:
         a._entry(wizard, 9, 0, "Expected Class", a.preset_expected_class_var, columnspan=3)
 
         a._entry(wizard, 11, 0, "Gap Threshold (0-1)", a.preset_gap_threshold_var, columnspan=2)
-        # Track gap threshold widgets for show/hide based on method (row 13 added below)
+        # Lacak widget gap threshold untuk show/hide berdasarkan method (row 13 ditambah di bawah)
         a._gap_threshold_widgets = []
         for _r in (11,):
             try:
@@ -148,7 +148,7 @@ class TemplatesTab:
             except Exception:
                 pass
 
-        # Part-ready method selector
+        # Selector method part-ready
         _pr_label = ttk.Label(wizard, text="Part Ready Method")
         _pr_label.grid(row=12, column=0, sticky="w", padx=(12, 8), pady=5)
         a.preset_part_ready_method_var = tk.StringVar(value="gap_template_match")
@@ -162,8 +162,8 @@ class TemplatesTab:
         method_combo.grid(row=12, column=1, columnspan=2, sticky="w", padx=(0, 12), pady=5)
         a.preset_part_ready_method_var.trace_add("write", lambda *_: self._on_part_ready_method_changed(a))
 
-        # Canny edge thresholds (gap_template_match only) — between the method
-        # dropdown and the reference capture button. Empty = auto-tuned (legacy).
+        # Threshold edge Canny (khusus gap_template_match) — antara dropdown
+        # method dan tombol capture reference. Kosong = auto-tuned (legacy).
         a.preset_canny_low_var = tk.StringVar(value="")
         a.preset_canny_high_var = tk.StringVar(value="")
         canny_row = ttk.Frame(wizard)
@@ -175,9 +175,9 @@ class TemplatesTab:
         ttk.Label(canny_row, text="(kosongkan = otomatis)", foreground="gray").pack(side="left")
         a._gap_threshold_widgets.append(canny_row)
 
-        # Search margin: how far (fraction of ROI's own w/h) the runtime search
-        # area grows around part_ready_roi so a part that shifts/tilts a little
-        # still matches, instead of requiring pixel-perfect alignment. 0 = legacy.
+        # Margin pencarian: seberapa jauh (fraksi dari w/h ROI itu sendiri) area
+        # pencarian runtime membesar di sekitar part_ready_roi supaya part yang
+        # geser/miring sedikit tetap match, bukan harus pixel-perfect. 0 = legacy.
         a.preset_gap_search_margin_var = tk.StringVar(value="0.0")
         margin_row = ttk.Frame(wizard)
         margin_row.grid(row=17, column=0, columnspan=4, sticky="ew", padx=(12, 12), pady=5)
@@ -186,21 +186,21 @@ class TemplatesTab:
         ttk.Label(margin_row, text="(toleransi part geser/miring sedikit, 0 = harus pas persis)", foreground="gray").pack(side="left")
         a._gap_threshold_widgets.append(margin_row)
 
-        # Mean-Std threshold fields (shown only when method=mean_std_threshold)
+        # Field threshold Mean-Std (tampil cuma kalau method=mean_std_threshold)
         a._entry(wizard, 14, 0, "MEAN_MAX", a.preset_mean_max_var, columnspan=2)
         a._entry(wizard, 15, 0, "STD_MAX", a.preset_std_max_var, columnspan=2)
         a._entry(wizard, 16, 0, "Min Confidence (0-1)", a.preset_min_match_ratio_var, columnspan=2)
 
-        # Reference patch buttons — row 19 (after mean_std fields + spacing)
+        # Tombol reference patch — row 19 (setelah field mean_std + spacing)
         ref_btn_row = ttk.Frame(wizard)
         ref_btn_row.grid(row=19, column=0, columnspan=4, sticky="ew", padx=12, pady=(0, 4))
-        ttk.Button(ref_btn_row, text="Capture Reference", command=a._capture_part_ready_ref).pack(side="left", padx=(0, 6))
-        ttk.Button(ref_btn_row, text="Upload Reference", command=a._upload_part_ready_ref).pack(side="left")
+        ttk.Button(ref_btn_row, text="Capture Referensi", command=a._capture_part_ready_ref).pack(side="left", padx=(0, 6))
+        ttk.Button(ref_btn_row, text="Upload Referensi", command=a._upload_part_ready_ref).pack(side="left")
         a.gap_ref_status_label = ttk.Label(wizard, text="Referensi: belum dikonfigurasi", foreground="gray")
         a.gap_ref_status_label.grid(row=20, column=0, columnspan=4, sticky="w", padx=12, pady=(0, 6))
 
-        # Persistent preview of the saved master (edge-map) image, below the
-        # capture/upload buttons.
+        # Preview persisten dari gambar master (edge-map) yang tersimpan, di bawah
+        # tombol capture/upload.
         a.gap_ref_preview_label = tk.Label(wizard, text="(belum ada foto master)", fg="gray")
         a.gap_ref_preview_label.grid(row=21, column=0, columnspan=4, sticky="w", padx=12, pady=(0, 8))
         a._gap_ref_preview_photo = None
@@ -208,7 +208,7 @@ class TemplatesTab:
         # Visual ROI picker
         self._build_roi_picker(a, wizard)
 
-        # Action buttons
+        # Tombol aksi
         btn_row = ttk.Frame(wizard)
         btn_row.grid(row=26, column=0, columnspan=4, sticky="ew", padx=12, pady=(16, 6))
         btn_row.columnconfigure(0, weight=1)
@@ -216,7 +216,7 @@ class TemplatesTab:
 
         a._preset_action_btn = ctk.CTkButton(
             btn_row,
-            text="Save & Deploy Preset",
+            text="Simpan & Deploy Preset",
             command=a.save_and_deploy_preset,
             fg_color=ACCENT,
             hover_color=ACCENT_HOVER,
@@ -237,7 +237,7 @@ class TemplatesTab:
             corner_radius=6,
         ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
-        # Part ready reference widgets (capture/upload ref, status label, preview) — rows 19-21
+        # Widget referensi part ready (capture/upload ref, label status, preview) — rows 19-21
         a._part_ready_ref_widgets = []
         for _r in (19, 20, 21):
             try:
@@ -246,7 +246,7 @@ class TemplatesTab:
             except Exception:
                 pass
 
-        # Keep references to mean-std threshold fields (shown only when method=mean_std_threshold)
+        # Simpan referensi ke field threshold mean-std (tampil cuma kalau method=mean_std_threshold)
         a._mean_std_field_widgets = []
         for _r in (14, 15, 16):
             try:
@@ -255,11 +255,11 @@ class TemplatesTab:
             except Exception:
                 pass
 
-        # Initial visibility sync
+        # Sinkronisasi visibility awal
         self._on_part_ready_method_changed(a)
 
     def _on_part_ready_method_changed(self, a) -> None:
-        """Show/hide gap vs mean-std fields based on the part-ready method."""
+        """Tampilkan/sembunyikan field gap vs mean-std berdasarkan method part-ready."""
         method = a.preset_part_ready_method_var.get()
         show_mean_std = (method == "mean_std_threshold")
         for w in getattr(a, "_mean_std_field_widgets", []):
@@ -297,29 +297,29 @@ class TemplatesTab:
         a.preset_roi_selector.grid(row=0, column=1, sticky="w", padx=(0, 8))
         a.preset_roi_selector.bind("<<ComboboxSelected>>", a._on_preset_roi_selected)
 
-        ttk.Button(roi_toolbar, text="Pick Image", command=a._pick_preset_roi_image).grid(row=0, column=3, padx=(0, 4))
-        a._live_cam_btn = ttk.Button(roi_toolbar, text="Start Live Camera", command=lambda: a._toggle_live_camera())
+        ttk.Button(roi_toolbar, text="Pilih Gambar", command=a._pick_preset_roi_image).grid(row=0, column=3, padx=(0, 4))
+        a._live_cam_btn = ttk.Button(roi_toolbar, text="Mulai Live Camera", command=lambda: a._toggle_live_camera())
         a._live_cam_btn.grid(row=0, column=4, padx=(0, 4))
         ttk.Button(roi_toolbar, text="Reset", command=a._reset_preset_roi).grid(row=0, column=5)
 
-        a.preset_roi_picker = RoiPickerCanvas(roi_panel, "Drag/resize selected ROI on the image", size=(520, 292))
+        a.preset_roi_picker = RoiPickerCanvas(roi_panel, "Drag/resize ROI terpilih di gambar", size=(520, 292))
         a.preset_roi_picker.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
         a.preset_roi_picker.on_roi_changed = lambda kind, roi: a._on_preset_roi_changed(kind, roi)
         a._on_preset_roi_selected()
 
-        # Mean Std Calibration section (collapsible)
+        # Bagian Kalibrasi Mean Std (bisa di-collapse)
         a._calib_mean_std_frame = ctk.CTkFrame(roi_panel, fg_color=PANEL_ALT_BG, corner_radius=6, border_width=1, border_color=BORDER)
         a._calib_mean_std_frame.grid(row=3, column=0, sticky="ew", padx=10, pady=(0, 8))
         a._calib_mean_std_frame.columnconfigure(1, weight=1)
 
         calib_header = ctk.CTkFrame(a._calib_mean_std_frame, fg_color="transparent")
         calib_header.grid(row=0, column=0, columnspan=4, sticky="ew", padx=8, pady=(4, 2))
-        ctk.CTkLabel(calib_header, text="Mean-Std Calibration", font=("Segoe UI", 9, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(calib_header, text="Kalibrasi Mean-Std", font=("Segoe UI", 9, "bold"), text_color=TEXT_PRIMARY).grid(row=0, column=0, sticky="w")
 
         # Step 1: Empty
         step1_frame = ctk.CTkFrame(a._calib_mean_std_frame, fg_color="transparent")
         step1_frame.grid(row=1, column=0, columnspan=4, sticky="ew", padx=8, pady=1)
-        ctk.CTkButton(step1_frame, text="1. Capture Empty (no part)", width=160, height=26,
+        ctk.CTkButton(step1_frame, text="1. Capture Empty (tanpa part)", width=160, height=26,
                       command=lambda: self._calib_capture(a, "empty")).grid(row=0, column=0, padx=(0, 4))
         a._calib_empty_result = ctk.CTkLabel(step1_frame, text="—", text_color=TEXT_SECONDARY, font=("Segoe UI", 9))
         a._calib_empty_result.grid(row=0, column=1, sticky="w")
@@ -327,7 +327,7 @@ class TemplatesTab:
         # Step 2: Part
         step2_frame = ctk.CTkFrame(a._calib_mean_std_frame, fg_color="transparent")
         step2_frame.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8, pady=1)
-        ctk.CTkButton(step2_frame, text="2. Capture Part (black)", width=160, height=26,
+        ctk.CTkButton(step2_frame, text="2. Capture Part (hitam)", width=160, height=26,
                       command=lambda: self._calib_capture(a, "part")).grid(row=0, column=0, padx=(0, 4))
         a._calib_part_result = ctk.CTkLabel(step2_frame, text="—", text_color=TEXT_SECONDARY, font=("Segoe UI", 9))
         a._calib_part_result.grid(row=0, column=1, sticky="w")
@@ -340,12 +340,12 @@ class TemplatesTab:
         a._calib_sticker_result = ctk.CTkLabel(step3_frame, text="—", text_color=TEXT_SECONDARY, font=("Segoe UI", 9))
         a._calib_sticker_result.grid(row=0, column=1, sticky="w")
 
-        # Result
+        # Hasil
         result_frame = ctk.CTkFrame(a._calib_mean_std_frame, fg_color="transparent")
         result_frame.grid(row=4, column=0, columnspan=4, sticky="ew", padx=8, pady=(4, 2))
-        a._calib_computed = ctk.CTkLabel(result_frame, text="Capture all 3 to compute thresholds", text_color=TEXT_SECONDARY, font=("Segoe UI", 9))
+        a._calib_computed = ctk.CTkLabel(result_frame, text="Capture ketiganya untuk hitung threshold", text_color=TEXT_SECONDARY, font=("Segoe UI", 9))
         a._calib_computed.grid(row=0, column=0, sticky="w")
-        ctk.CTkButton(result_frame, text="Apply", width=60, height=24, fg_color=ACCENT, hover_color=ACCENT_HOVER,
+        ctk.CTkButton(result_frame, text="Terapkan", width=60, height=24, fg_color=ACCENT, hover_color=ACCENT_HOVER,
                       text_color=TEXT_ON_ACCENT, command=lambda: self._calib_apply(a)).grid(row=0, column=3, sticky="e", padx=(8, 0))
 
         for var in (
@@ -361,18 +361,18 @@ class TemplatesTab:
             var.trace_add("write", lambda *_: a._sync_preset_roi_picker())
 
     # ------------------------------------------------------------------
-    # Defect ROI Editor
+    # Editor ROI Defect
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
-    # Logo Capture
+    # Capture Logo
 
     # ------------------------------------------------------------------
-    # Mean-Std Calibration
+    # Kalibrasi Mean-Std
     # ------------------------------------------------------------------
 
     def _calib_capture(self, a, step: str) -> None:
-        """Capture a frame from camera and compute mean/std for the current ROI."""
+        """Capture satu frame dari kamera dan hitung mean/std untuk ROI saat ini."""
         cam_idx = int(_float_or_default(a.preset_camera_index_var.get(), 0))
         try:
             from client_tk.app.services.camera_capture import CameraCaptureService
@@ -383,13 +383,13 @@ class TemplatesTab:
             frame = cam.get_latest_frame()
             cam.stop()
             if frame is None:
-                messagebox.showwarning("Calibration", "Camera returned no frame.")
+                messagebox.showwarning("Kalibrasi", "Kamera tidak mengembalikan frame.")
                 return
         except Exception as exc:
-            messagebox.showerror("Calibration", f"Failed to capture: {exc}")
+            messagebox.showerror("Kalibrasi", f"Gagal capture: {exc}")
             return
 
-        # Crop to part_ready ROI
+        # Crop ke ROI part_ready
         roi_f = a._roi_payload_from_vars(
             a.part_ready_roi_x_var, a.part_ready_roi_y_var,
             a.part_ready_roi_w_var, a.part_ready_roi_h_var,
@@ -405,7 +405,7 @@ class TemplatesTab:
         crop = frame[y:y2, x:x2]
 
         if crop.size == 0:
-            messagebox.showwarning("Calibration", "ROI crop is empty. Check ROI position.")
+            messagebox.showwarning("Kalibrasi", "Crop ROI kosong. Periksa posisi ROI.")
             return
 
         import cv2
@@ -424,7 +424,7 @@ class TemplatesTab:
             a._calib_sticker_std = std_val
             a._calib_sticker_result.configure(text=f"std={std_val:.1f}")
 
-        # Auto-compute if all 3 captured
+        # Auto-hitung kalau ketiganya sudah di-capture
         if a._calib_empty_mean > 0 and a._calib_part_mean > 0 and a._calib_sticker_std > 0:
             from backend.app.services.part_ready_detector import compute_mean_std_thresholds
             result = compute_mean_std_thresholds(
@@ -436,9 +436,9 @@ class TemplatesTab:
             )
 
     def _calib_apply(self, a) -> None:
-        """Apply computed thresholds to the template."""
+        """Terapkan threshold hasil hitung ke template."""
         if a._calib_empty_mean == 0 or a._calib_part_mean == 0 or a._calib_sticker_std == 0:
-            messagebox.showwarning("Calibration", "Capture all 3 conditions first.")
+            messagebox.showwarning("Kalibrasi", "Capture ketiga kondisi dulu.")
             return
         from backend.app.services.part_ready_detector import compute_mean_std_thresholds
         result = compute_mean_std_thresholds(
@@ -447,4 +447,4 @@ class TemplatesTab:
         )
         a.preset_mean_max_var.set(str(result["mean_max"]))
         a.preset_std_max_var.set(str(result["std_max"]))
-        a._set_status(f"Applied mean_std thresholds: MEAN_MAX={result['mean_max']}, STD_MAX={result['std_max']}")
+        a._set_status(f"Threshold mean_std diterapkan: MEAN_MAX={result['mean_max']}, STD_MAX={result['std_max']}")

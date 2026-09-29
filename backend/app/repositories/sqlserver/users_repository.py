@@ -1,9 +1,9 @@
-"""Authentication backed by the factory's own `operator` table.
+"""Autentikasi berbasis tabel `operator` milik pabrik.
 
-See the Postgres sibling (`postgres/users_repository.py`) for the full
-rationale — same contract, pyodbc instead of psycopg: no auto-create, no
-seeding, MC_ID is plain per-row data (not a query scope), and No_RFID
-doubles as the login password.
+Lihat berkas kembarannya di Postgres (`postgres/users_repository.py`) untuk
+alasan lengkapnya — kontrak sama, pyodbc menggantikan psycopg: tidak ada
+auto-create, tidak ada seeding, MC_ID cuma data per-baris biasa (bukan query
+scope), dan No_RFID sekaligus jadi password login.
 """
 from __future__ import annotations
 
@@ -166,10 +166,10 @@ class SqlServerUsersRepository:
             try:
                 with self._connect() as conn:
                     cursor = conn.cursor()
-                    # Compute No = MAX(No) + 1 ourselves rather than trusting a DB
-                    # identity to stay in sync (the operator table can be written to
-                    # by other systems too). If another writer takes the same number
-                    # first, the PK on No rejects it and we retry.
+                    # Hitung No = MAX(No) + 1 sendiri, tidak percaya identity DB
+                    # supaya tetap sinkron (tabel operator bisa juga ditulis sistem
+                    # lain). Kalau writer lain ambil angka yang sama duluan, PK di
+                    # No akan menolaknya dan kita coba lagi.
                     cursor.execute(
                         f"INSERT INTO {self._table} "
                         f"({self._col_member_id}, {self._col_rfid}, {self._col_status}, "
@@ -188,15 +188,15 @@ class SqlServerUsersRepository:
                 inserted_id = None
                 continue
         if inserted_id is None:
-            raise ValueError("Failed to create user: could not allocate a free No after several attempts.")
+            raise ValueError("Gagal membuat user: tidak berhasil mengalokasikan No yang bebas setelah beberapa percobaan.")
         record = self.get_by_id(inserted_id)
         if record is None:
-            raise ValueError("Failed to create user.")
+            raise ValueError("Gagal membuat user.")
         return self._public_record(record)
 
     def set_active(self, user_id: int, is_active: bool) -> dict[str, Any]:
-        # No is_active column on the operator table — enabling/disabling
-        # accounts isn't supported on this backend, only add/edit/delete.
+        # Tidak ada kolom is_active di tabel operator — enable/disable akun
+        # tidak didukung di backend ini, cuma add/edit/delete.
         record = self.get_by_id(user_id)
         if record is None:
             raise ValueError("User not found.")

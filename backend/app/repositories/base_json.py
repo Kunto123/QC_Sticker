@@ -32,8 +32,8 @@ class JsonRepository:
     def save(self, data: Any) -> None:
         with self._lock:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            # Atomic write: write to temp file in same dir, then os.replace.
-            # Prevents corruption on crash/power-loss mid-write.
+            # Atomic write: tulis ke file sementara di direktori sama, lalu os.replace.
+            # Mencegah korup saat crash/mati listrik di tengah proses tulis.
             content = json.dumps(data, ensure_ascii=True, indent=2)
             fd, tmp_path = tempfile.mkstemp(
                 prefix=self._path.name + ".",
@@ -47,7 +47,7 @@ class JsonRepository:
                     os.fsync(fd)
                 os.replace(tmp_path, self._path)
             except BaseException:
-                # Clean up temp file on failure
+                # Bersihkan file sementara kalau gagal
                 try:
                     os.unlink(tmp_path)
                 except OSError:

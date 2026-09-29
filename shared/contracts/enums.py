@@ -17,11 +17,11 @@ class DecisionCode(StrEnum):
 class RejectReasonCode(StrEnum):
     NOT_FOUND = "NOT_FOUND"
     WRONG_TYPE = "WRONG_TYPE"
-    # deprecated: WRONG_TEXT kept for backward compat with old DB data
+    # deprecated: WRONG_TEXT dipertahankan demi kompatibilitas dengan data DB lama
     WRONG_TEXT = "WRONG_TEXT"
     LOW_ROI_CONF = "LOW_ROI_CONF"
     LOW_CLASS_CONF = "LOW_CLASS_CONF"
-    # deprecated: LOW_OCR_CONF kept for backward compat with old DB data
+    # deprecated: LOW_OCR_CONF dipertahankan demi kompatibilitas dengan data DB lama
     LOW_OCR_CONF = "LOW_OCR_CONF"
     OUT_OF_POSITION = "OUT_OF_POSITION"
     OUT_OF_ANGLE = "OUT_OF_ANGLE"

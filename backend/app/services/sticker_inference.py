@@ -41,8 +41,8 @@ class StickerInferenceService:
         self._backend_cache: dict[str, InferenceBackend] = {}
 
     def unload_model(self, model_path: str) -> int:
-        """Drop a model (and its meta) from the runtime caches so its files can be
-        deleted — OpenVINO keeps the .bin memory-mapped while compiled."""
+        """Buang satu model (dan meta-nya) dari runtime cache supaya filenya bisa
+        dihapus — OpenVINO menahan .bin memory-mapped selagi ter-compile."""
         import gc
 
         resolved = str(Path(model_path).resolve())
@@ -91,7 +91,7 @@ class StickerInferenceService:
             path = Path(meta_path)
             if not path.exists():
                 logger.warning("[inference] meta file not found: %s", meta_path)
-                self._meta_cache.pop(meta_path, None)  # evict stale entry
+                self._meta_cache.pop(meta_path, None)  # buang entry basi
                 return {}
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -110,9 +110,9 @@ class StickerInferenceService:
         target_size: tuple[int, int],
         color: tuple[int, int, int] = (114, 114, 114),
     ) -> tuple[np.ndarray, float, int, int]:
-        """Resize image preserving aspect ratio, pad remainder with gray.
+        """Resize gambar sambil menjaga aspect ratio, sisanya di-pad abu-abu.
         Returns: (padded_image, scale, pad_left, pad_top)
-        scale: factor applied to original image to fit in target_size
+        scale: faktor yang diterapkan ke gambar asli supaya muat di target_size
         """
         h_orig, w_orig = image.shape[:2]
         h_tgt, w_tgt = target_size
@@ -127,7 +127,7 @@ class StickerInferenceService:
         return canvas, scale, pad_left, pad_top
 
     def _get_backend(self, mode: str) -> InferenceBackend:
-        """Create and cache backend instances (thread-safe)."""
+        """Buat dan cache instance backend (thread-safe)."""
         with self._runtime_lock:
             if mode in self._backend_cache:
                 return self._backend_cache[mode]
@@ -164,7 +164,7 @@ class StickerInferenceService:
                     device_resolution=device_resolution,
                 )
             else:
-                raise ValueError(f"Unknown backend mode: {mode}")
+                raise ValueError(f"Mode backend tidak dikenal: {mode}")
 
             self._backend_cache[mode] = backend
             return backend
@@ -283,7 +283,7 @@ class StickerInferenceService:
         if mode == "classic":
             return self._predict_classic(image, vision, expected_class)
 
-        # Auto-detect TFLite from file extension when mode is "auto"
+        # Auto-detect TFLite dari ekstensi file saat mode-nya "auto"
         if mode == "auto":
             model_path = self._resolve_model_path(vision)
             if model_path:
@@ -299,7 +299,7 @@ class StickerInferenceService:
             else:
                 mode = "ultralytics"
 
-        # TFLite mode: CPU-only, no GPU device resolution needed
+        # Mode TFLite: CPU-only, tidak butuh resolusi device GPU
         if mode == "tflite":
             try:
                 return self._get_backend("tflite").predict(image, vision, expected_class=expected_class)
@@ -311,7 +311,7 @@ class StickerInferenceService:
                 payload["fallback_reason"] = f"tflite_error: {exc}"
                 return payload
 
-        # ONNX mode: CPU-only via onnxruntime
+        # Mode ONNX: CPU-only lewat onnxruntime
         if mode == "onnx":
             try:
                 return self._get_backend("onnx").predict(image, vision, expected_class=expected_class)
@@ -323,7 +323,7 @@ class StickerInferenceService:
                 payload["fallback_reason"] = f"onnx_error: {exc}"
                 return payload
 
-        # OpenVINO mode: Intel CPU optimized
+        # Mode OpenVINO: dioptimasi untuk CPU Intel
         if mode == "openvino":
             try:
                 return self._get_backend("openvino").predict(image, vision, expected_class=expected_class)
@@ -335,7 +335,7 @@ class StickerInferenceService:
                 payload["fallback_reason"] = f"openvino_error: {exc}"
                 return payload
 
-        # Ultralytics mode (auto/ultralytics)
+        # Mode Ultralytics (auto/ultralytics)
         try:
             return self._get_backend("ultralytics").predict(image, vision, expected_class=expected_class)
         except Exception as exc:
