@@ -102,5 +102,28 @@ class AcceptGenerationCountTest(unittest.TestCase):
         self.assertEqual(state.inference_accept_count, 3)
 
 
+class AcceptCommitGateTest(unittest.TestCase):
+    """`_accept_commit_ready`: holdover boleh menjaga streak, tapi tidak boleh men-commit.
+
+    Regresi lapangan 2026-10-12: frame NOT_FOUND ("inferring", 0 kandidat) di dalam
+    holdover lolos sebagai effective-accept, grace 1500 ms habis, dan keputusan frame
+    itu (REJECT) ter-commit → buzzer NG pada sticker yang benar.
+    """
+
+    _ALL_OK = dict(grace_ok=True, frames_ok=True, inference_ok=True, ms_ok=True)
+
+    def test_real_accept_with_all_gates_commits(self) -> None:
+        self.assertTrue(InspectionSessionService._accept_commit_ready(is_accept=True, **self._ALL_OK))
+
+    def test_holdover_frame_never_commits_even_when_all_gates_pass(self) -> None:
+        self.assertFalse(InspectionSessionService._accept_commit_ready(is_accept=False, **self._ALL_OK))
+
+    def test_real_accept_still_blocked_by_each_unmet_gate(self) -> None:
+        for gate in self._ALL_OK:
+            with self.subTest(gate=gate):
+                gates = {**self._ALL_OK, gate: False}
+                self.assertFalse(InspectionSessionService._accept_commit_ready(is_accept=True, **gates))
+
+
 if __name__ == "__main__":
     unittest.main()

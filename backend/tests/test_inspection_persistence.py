@@ -211,6 +211,77 @@ class HybridInspectionPersistenceTest(unittest.TestCase):
             assert stored is not None
             self.assertEqual(stored["push_status"], "sent")
 
+    def test_concurrent_worker_push_does_not_insert_same_record_twice(self) -> None:
+        # Regresi lapangan 2026-10-12: create_result (push sinkron) dan PushWorker
+        # (yang melihat record masih `pending`) meng-INSERT record yang sama ke mirror
+        # → dua baris DB dengan DateCheckMC identik. Mirror lambat disimulasikan
+        # dengan sleep supaya window `pending` terbuka lebar.
+        import time
+
+        started = threading.Event()
+
+        class _SlowMirror:
+            def __init__(self) -> None:
+                self.calls = 0
+                self._lock = threading.Lock()
+
+            def create_result(self, payload: dict) -> dict:
+                with self._lock:
+                    self.calls += 1
+                    mirror_id = 1000 + self.calls
+                started.set()
+                time.sleep(0.3)
+                return {"id": mirror_id}
+
+        local_repo = InspectionResultsRepository()
+        mirror = _SlowMirror()
+        repo = HybridInspectionResultsRepository(local_repo, mirror)
+        errors: list[BaseException] = []
+        created_ids: list[int] = []
+
+        def request_thread() -> None:
+            try:
+                created_ids.append(int(repo.create_result(_sample_payload())["id"]))
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        def worker_thread() -> None:
+            try:
+                started.wait(timeout=5)
+                # Seperti PushWorker._process_batch: snapshot record `pending`.
+                # Store lokal dipakai bersama antar-test, jadi hanya record yang
+                # masih `pending` (milik test ini) yang diproses.
+                for record in local_repo.list_results(push_status="pending", limit=50, offset=0):
+                    repo._apply_mirror_result(record)
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=request_thread), threading.Thread(target=worker_thread)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(mirror.calls, 1, "record yang sama ter-INSERT lebih dari sekali")
+        stored = local_repo.get_result(created_ids[0])
+        assert stored is not None
+        self.assertEqual(stored["push_status"], "sent")
+        self.assertEqual(stored["sql_mirror_id"], 1001)
+
+    def test_apply_mirror_result_skips_record_already_sent(self) -> None:
+        local_repo = InspectionResultsRepository()
+        mirror = _MirrorSuccess()
+        repo = HybridInspectionResultsRepository(local_repo, mirror)
+        created = repo.create_result(_sample_payload())
+        stale_snapshot = {**created, "push_status": "pending", "sql_mirror_id": None}
+
+        result = repo._apply_mirror_result(stale_snapshot)
+
+        self.assertEqual(len(mirror.seen_payloads), 1)
+        self.assertEqual(result["push_status"], "sent")
+        self.assertEqual(result["sql_mirror_id"], 987)
+
     def test_sql_payload_uses_only_required_contract_fields(self) -> None:
         payload = SqlServerInspectionMirrorRepository.build_sql_payload(_sample_payload())
 

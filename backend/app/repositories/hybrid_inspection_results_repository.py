@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,6 +17,12 @@ class HybridInspectionResultsRepository:
     ) -> None:
         self._local_repo = local_repo
         self._sql_mirror_repo = sql_mirror_repo
+        # Serialisasi push ke mirror: `create_result` (sinkron, thread request) dan
+        # `PushWorker` (thread background, poll record `pending`) bisa memproses
+        # record yang sama bersamaan — INSERT mirror tidak idempotent, jadi tanpa
+        # ini satu hasil masuk dua kali (lapangan 2026-10-12: mirror id 1312067 dan
+        # 1312068 dengan DateCheckMC identik untuk satu record lokal).
+        self._push_lock = threading.Lock()
 
     def _utcnow_iso(self) -> str:
         return datetime.now(UTC).isoformat()
@@ -24,6 +31,19 @@ class HybridInspectionResultsRepository:
         if self._sql_mirror_repo is None:
             raise ValueError("Push mirror SQL belum dikonfigurasi.")
 
+        with self._push_lock:
+            # `record` bisa snapshot basi (worker mengambilnya sebelum thread lain
+            # selesai mem-push) — baca ulang status terkini di dalam lock.
+            current = self._local_repo.get_result(int(record["id"]))
+            if current is None:
+                return record
+            if str(current.get("push_status") or "").strip().lower() == "sent":
+                record.update(current)
+                return record
+            record.update(current)
+            return self._push_to_mirror_locked(record)
+
+    def _push_to_mirror_locked(self, record: dict[str, Any]) -> dict[str, Any]:
         attempt_at = self._utcnow_iso()
         try:
             mirror_record = self._sql_mirror_repo.create_result(record)

@@ -636,6 +636,26 @@ class InspectionSessionService:
                 logger.error("[inspection] manual_release force_release failed: %s", exc)
         return self._session_payload(state)
 
+    @staticmethod
+    def _accept_commit_ready(
+        *,
+        is_accept: bool,
+        grace_ok: bool,
+        frames_ok: bool,
+        inference_ok: bool,
+        ms_ok: bool,
+    ) -> bool:
+        """Gate commit ACCEPT.
+
+        `is_accept` harus True untuk frame yang sedang di-commit. Holdover cuma
+        menjaga streak/timer tetap hidup lewat celah deteksi; dia tidak boleh
+        meng-commit, karena yang di-commit adalah keputusan frame itu sendiri —
+        frame NOT_FOUND di dalam holdover akan ter-commit sebagai REJECT dan
+        menyalakan buzzer NG pada sticker yang benar (reject_log.jsonl lapangan,
+        2026-10-12: semua NG berstatus `inferring`, 0 kandidat).
+        """
+        return bool(is_accept and grace_ok and frames_ok and inference_ok and ms_ok)
+
     def _update_accept_generation_count(
         self,
         state: SessionState,
@@ -1350,12 +1370,22 @@ class InspectionSessionService:
             _frames_ok = state.policy_stable_frames >= self._accept_stable_frames
             _inference_ok = state.inference_accept_count >= self._accept_stable_frames
             _ms_ok = _stable_elapsed_ms >= self._accept_stable_ms
-            if _grace_ok and _frames_ok and _inference_ok and _ms_ok:
+            if self._accept_commit_ready(
+                is_accept=_is_accept,
+                grace_ok=_grace_ok,
+                frames_ok=_frames_ok,
+                inference_ok=_inference_ok,
+                ms_ok=_ms_ok,
+            ):
                 _commit_allowed = True
                 _policy_action = "accept_commit"
             else:
                 _policy_action = "pending"
                 _parts = []
+                if not _is_accept:
+                    # Frame ini cuma "effective accept" lewat holdover — keputusan
+                    # frame-nya sendiri bukan ACCEPT, jadi tunggu frame ACCEPT asli.
+                    _parts.append("holdover_awaiting_real_accept")
                 if not _grace_ok:
                     _parts.append(f"grace({_accept_cycle_elapsed_ms:.0f}/{self._commit_grace_ms}ms)")
                 if not _frames_ok:
@@ -1396,6 +1426,23 @@ class InspectionSessionService:
                 _policy_action = "timeout_reject"
                 validation["decision"] = DecisionCode.REJECT.value
                 validation["reject_reason_code"] = RejectReasonCode.COMMIT_TIMEOUT.value
+                # Jejak diagnosa: NG timeout tidak punya baris DB, jadi tanpa ini
+                # tidak ada cara membedakan "sticker memang tidak ada" dari
+                # "siklus macet / timer basi".
+                validation["validation_details"] = {
+                    **(validation.get("validation_details") or {}),
+                    "timeout_context": {
+                        "settled_elapsed_ms": round(_settled_elapsed_ms, 1),
+                        "reject_timeout_ms": self._reject_timeout_ms,
+                        "last_policy_key": state.last_policy_key,
+                        "last_decision": _policy_key.split("|")[0],
+                        "accept_cycle_elapsed_ms": round(_accept_cycle_elapsed_ms, 1),
+                        "inference_accept_count": state.inference_accept_count,
+                        "pending_reason": _pending_reason,
+                        "clamp_status": clamp_payload.get("status"),
+                        "inference_generation": state.inference_result_generation,
+                    },
+                }
 
         # ── Item 1: Gate kesehatan PLC pre-commit ──
         # Kalau PLC aktif (bukan dry-run) dan worker ada, wajib link sehat sebelum commit.
@@ -1499,15 +1546,25 @@ class InspectionSessionService:
                 except Exception as exc:  # noqa: BLE001
                     logger.error("[inspection] plc_worker.notify_decision failed: %s", exc)
 
-            # ── COMMIT_TIMEOUT: PLC fire, tapi TIDAK ADA tulis DB ──
+            # ── COMMIT_TIMEOUT: PLC fire + reject log, tapi TIDAK ADA tulis DB ──
             # Timeout reject men-trigger buzzer NG + solenoid hold (lewat PLC),
             # tapi tidak ada baris inspeksi yang ditulis — siklus reset lokal.
+            # Reject log tetap ditulis (dengan `timeout_context`) supaya NG
+            # timeout bisa diaudit; `_maybe_persist` untuk REJECT cuma menulis log.
             _is_timeout_reject = (
                 _reason == RejectReasonCode.COMMIT_TIMEOUT.value
                 and validation.get("decision") == DecisionCode.REJECT.value
             )
             if _is_timeout_reject:
-                db_write = {"written": False, "reason": "timeout_reject_no_db"}
+                db_write = self._maybe_persist(
+                    validation,
+                    state,
+                    part_ready=part_ready,
+                    part_ready_roi_meta=part_ready_roi_meta,
+                    sticker_roi_meta=sticker_roi_meta,
+                    sticker_detection=sticker_detection,
+                    event_id=event_id,
+                )
             else:
                 # ── Interlock commit PLC ──────────────────────────────────────
                 # Kalau PLC aktif (bukan dry-run) dan link-nya tidak sehat, blokir
