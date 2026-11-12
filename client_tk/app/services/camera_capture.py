@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 
 import cv2
+
+_logger = logging.getLogger(__name__)
 
 
 class CameraCaptureService:
@@ -65,50 +68,97 @@ class CameraCaptureService:
     def _open_camera(self, width=None, height=None, fps=None) -> None:
         """Buka kamera dengan fallback backend."""
         self._capture = None
-        backend_candidates = []
+        # Urutan sama dengan cv2.VideoCapture(idx) biasa (yang dipakai live camera admin,
+        # terbukti jalan), lalu DSHOW / MSMF eksplisit sebagai cadangan. Sebagian kamera USB
+        # "terbuka" di DSHOW tapi mengirim frame hitam tanpa error apa pun, jadi tiap backend
+        # diverifikasi dengan membaca frame nyata sebelum dipakai.
+        backend_candidates = [None]
         if hasattr(cv2, "CAP_DSHOW"):
             backend_candidates.append(cv2.CAP_DSHOW)
         if hasattr(cv2, "CAP_MSMF"):
             backend_candidates.append(cv2.CAP_MSMF)
-        backend_candidates.append(None)
 
+        fallback = None  # backend yang terbuka tapi frame-nya hitam / kosong
+        fallback_name = ""
+        chosen = None
         for backend in backend_candidates:
+            name = "default" if backend is None else str(backend)
             capture = (
                 cv2.VideoCapture(self._camera_index)
                 if backend is None
                 else cv2.VideoCapture(self._camera_index, backend)
             )
-            if capture.isOpened():
-                self._capture = capture
+            if not capture.isOpened():
+                capture.release()
+                continue
+            self._configure_capture(capture, width, height, fps)
+            if self._capture_has_signal(capture):
+                chosen, chosen_name = capture, name
                 break
-            capture.release()
+            _logger.warning(
+                "[camera] index=%s backend=%s terbuka tapi frame hitam/kosong, coba backend lain",
+                self._camera_index,
+                name,
+            )
+            if fallback is None:
+                fallback, fallback_name = capture, name
+            else:
+                capture.release()
 
-        if self._capture is None or not self._capture.isOpened():
+        if chosen is None:
+            chosen, chosen_name = fallback, fallback_name
+            fallback = None
+            if chosen is not None:
+                _logger.warning(
+                    "[camera] index=%s: semua backend memberi frame hitam; pakai backend=%s. "
+                    "Cek exposure / kamera tertutup / driver.",
+                    self._camera_index,
+                    chosen_name,
+                )
+        if fallback is not None:
+            fallback.release()
+
+        if chosen is None or not chosen.isOpened():
             raise RuntimeError(f"Tidak bisa membuka kamera index {self._camera_index}")
+        self._capture = chosen
+        _logger.info("[camera] index=%s dibuka dengan backend=%s", self._camera_index, chosen_name)
+        self._actual_settings = {
+            "width": float(self._capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0.0),
+            "height": float(self._capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0.0),
+            "fps": float(self._capture.get(cv2.CAP_PROP_FPS) or 0.0),
+        }
+
+    @staticmethod
+    def _configure_capture(capture, width, height, fps) -> None:
         if hasattr(cv2, "CAP_PROP_BUFFERSIZE"):
-            self._capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         # Exposure yang bisa dikonfigurasi
         _auto_exp = int(os.getenv("QC_SUITE_CAMERA_AUTO_EXPOSURE", "1"))
         if _auto_exp == 0:
             _exp_val = int(os.getenv("QC_SUITE_CAMERA_EXPOSURE_VALUE", "-6"))
             try:
                 if hasattr(cv2, "CAP_PROP_AUTO_EXPOSURE"):
-                    self._capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+                    capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
                 if hasattr(cv2, "CAP_PROP_EXPOSURE"):
-                    self._capture.set(cv2.CAP_PROP_EXPOSURE, _exp_val)
+                    capture.set(cv2.CAP_PROP_EXPOSURE, _exp_val)
             except Exception:
                 pass
         if width is not None and int(width) > 0:
-            self._capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
+            capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
         if height is not None and int(height) > 0:
-            self._capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
+            capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
         if fps is not None and float(fps) > 0:
-            self._capture.set(cv2.CAP_PROP_FPS, float(fps))
-        self._actual_settings = {
-            "width": float(self._capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0.0),
-            "height": float(self._capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0.0),
-            "fps": float(self._capture.get(cv2.CAP_PROP_FPS) or 0.0),
-        }
+            capture.set(cv2.CAP_PROP_FPS, float(fps))
+
+    @staticmethod
+    def _capture_has_signal(capture, attempts: int = 12, delay_s: float = 0.05) -> bool:
+        """True kalau dalam beberapa read ada frame yang tidak hitam total."""
+        for _ in range(attempts):
+            ok, frame = capture.read()
+            if ok and frame is not None and frame.size and int(frame.max()) > 8:
+                return True
+            time.sleep(delay_s)
+        return False
 
     def _loop(self) -> None:
         """Loop capture utama dengan auto-reconnect dan epoch guard."""
