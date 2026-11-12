@@ -47,6 +47,7 @@ PLC_POLL_INTERVAL_MS = 2_000
 
 AUTO_START_FRAME_WAIT_MS = 150
 AUTO_START_MAX_ATTEMPTS = 40
+CAMERA_RETRY_MS = 3_000
 
 
 class OperatorScreen(ctk.CTkFrame):
@@ -64,6 +65,7 @@ class OperatorScreen(ctk.CTkFrame):
         self._lock = threading.Lock()
         self._after_id: str | None = None
         self._preview_after_id: str | None = None
+        self._camera_retry_after_id: str | None = None
         self._preview_interval_ms = max(15, int(round(1000.0 / DEFAULT_OPERATOR_PREVIEW_FPS)))
         self._heartbeat_after_id: str | None = None
         self._plc_poll_after_id: str | None = None
@@ -477,16 +479,34 @@ class OperatorScreen(ctk.CTkFrame):
         self._auto_start_done = True
         values = list(self.template_selector.cget("values") or [])
         if not values:
-            self.info_var.set("Tidak ada template tersedia untuk auto start.")
+            # Live preview tidak boleh bergantung pada template: tanpa template
+            # (daftar kosong / gagal dimuat) kamera tetap dinyalakan supaya operator
+            # melihat feed, session baru bisa dimulai setelah template tersedia.
+            self.info_var.set("Tidak ada template tersedia untuk auto start. Live camera tetap dinyalakan.")
+            self._ensure_camera_preview()
             return
         first_label = str(values[0])
         self.template_choice.set(first_label)
         self.info_var.set("Auto start: memilih template pertama.")
         self._on_template_selected()
         if not self._start_camera(show_errors=False):
-            self.info_var.set("Auto start: kamera gagal dibuka. Start Camera bisa dilakukan manual.")
+            self.info_var.set("Auto start: kamera gagal dibuka, mencoba lagi otomatis...")
+            self._schedule_camera_retry()
             return
         self._wait_for_auto_start_frame(attempt=0)
+
+    def _ensure_camera_preview(self) -> None:
+        """Nyalakan kamera untuk live preview; kalau gagal, coba lagi berkala."""
+        self._camera_retry_after_id = None
+        if self._closed or self.capture.is_active:
+            return
+        if not self._start_camera(show_errors=False):
+            self._schedule_camera_retry()
+
+    def _schedule_camera_retry(self) -> None:
+        if self._closed or self._camera_retry_after_id:
+            return
+        self._camera_retry_after_id = self.after(CAMERA_RETRY_MS, self._ensure_camera_preview)
 
     def _wait_for_auto_start_frame(self, *, attempt: int) -> None:
         if self._closed or self.state.active_session:
@@ -968,6 +988,10 @@ class OperatorScreen(ctk.CTkFrame):
         except tk.TclError as exc:
             self.state.latest_error = str(exc)
             self.info_var.set(f"UI render warning: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            # Jangan biarkan preview diam-diam kosong kalau render error.
+            _logger.warning("Preview render error", exc_info=True)
+            self.info_var.set(f"Preview error: {exc}")
         finally:
             # Keep preview alive as long as capture is active (even during reconnect)
             if not self._closed and self.capture.is_active:
@@ -1815,6 +1839,12 @@ class OperatorScreen(ctk.CTkFrame):
                 pass
             self._after_id = None
         self._cancel_preview_tick()
+        if self._camera_retry_after_id:
+            try:
+                self.after_cancel(self._camera_retry_after_id)
+            except tk.TclError:
+                pass
+            self._camera_retry_after_id = None
         if self._heartbeat_after_id:
             try:
                 self.after_cancel(self._heartbeat_after_id)
